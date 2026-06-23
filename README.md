@@ -43,6 +43,7 @@ issue-check --format markdown
 issue-check --color never
 issue-check --stale-days 30
 issue-check --show-key
+issue-check --sprint            # the repo's current sprint (see below)
 ```
 
 If run outside a git repository without `--repo`, it prints an actionable error.
@@ -93,6 +94,65 @@ The other columns carry the detail (for your own issues; blank on context rows):
 
 `--format markdown` renders the same tree as a nested list.
 
+## Sprint view (`--sprint`)
+
+Where the default view is *"what's on my plate?"*, `issue-check --sprint` is
+*"what's in our current sprint, and who has it?"* — a **team** view of a repo's
+GitHub Projects v2 board, scoped to the **current iteration**. It groups every
+issue in the sprint into three buckets — **`yours` → `others` → `unassigned`** —
+under a title carrying the sprint name, and adds **Assignee** and **Status**
+columns:
+
+```
+Issue                            Age  Assignee     Status        Labels   Prog  Cmt
+── Sprint 7  ·  current sprint ──────────────────────────────────────────────────────
+── yours ──────────────────────
+  • ⇄ #142  Wire up the exporter   4w  a-user       In review     …        1/7    0
+── others ─────────────────────
+  ·   #138  Tidy the config load  13d  a-teammate   In progress   …               1
+── unassigned ─────────────────
+  ·   #131  Flaky integration te…  2w  —            Backlog       …        0/2    0
+```
+
+*(Identifiers above are synthetic. Your real board lives only in your local
+config — see below; it is never part of this repo.)*
+
+`yours` rows keep the full health glyph + linked-PR marker; `others`/`unassigned`
+are dimmed whole. Each bucket is sorted **active-first** by board Status. Done and
+released items are included (a finished sprint item shows its status). It is a
+single query — the board is filtered to its current iteration server-side.
+
+This is opt-in per repo: a repo must be mapped to a project board in config
+(below). See [`SPRINT.md`](./SPRINT.md) for the full design.
+
+### Configuring the board
+
+Add a `repos` block to your config file (same file as the special labels below;
+run `issue-check --config-path` for its location), keyed by `OWNER/REPO`:
+
+```json
+{
+  "repos": {
+    "an-org/a-repo": {
+      "project": "https://github.com/orgs/an-org/projects/1",
+      "statusOrder": ["In progress", "In review", "Blocked", "Backlog"]
+    }
+  }
+}
+```
+
+- **`project`** (required) — the board URL (`/orgs/OWNER/...` or `/users/OWNER/...`;
+  a trailing `/views/N` is fine) or shorthand `OWNER/projects/N`.
+- **`statusOrder`** (optional) — your board's statuses listed front-to-back for the
+  active-first sort; values must match the board's status names exactly (including
+  any emoji prefix). Any status you don't list sorts last.
+- **`sprintField`** / **`statusField`** (optional) — default to GitHub's own
+  `Iteration` and `Status` field names; set them only if your board renamed them.
+
+This config — with your real org, repo, and project — stays in your local config
+file; it is intentionally **not** committed to the repo (the tool ships agnostic).
+`gh` must have the `read:project` scope (`gh auth refresh -s read:project`).
+
 ## Special labels (configuration)
 
 By default the label set is shown agnostically — except `blocked`, which is
@@ -130,14 +190,16 @@ isolated:
 
 | Module | Responsibility |
 | --- | --- |
-| `model.py` | Pure domain: raw JSON → `IssueRow` index → sorted forest (`build_index`/`build_forest`), health state, progress. |
-| `github.py` | The only impure module: `git`/`gh` shelling, repo + login detection, the GraphQL fetch + pagination. Failures raise `IssueCheckError`. |
-| `render.py` | Pure presentation: ANSI/width primitives, `terminal_tree`, `markdown_tree`. |
-| `cli.py` | Argument parsing and wiring; turns `IssueCheckError` into a clean exit. |
+| `model.py` | Pure domain: raw JSON → `IssueRow` index → sorted forest (`build_index`/`build_forest`); the sprint buckets (`build_sprint_view`); health state, progress. |
+| `github.py` | The only impure module: `git`/`gh` shelling, repo + login detection, the issue + project-board GraphQL fetches (`fetch_assigned_issues`, `fetch_sprint_items`) + pagination. Failures raise `IssueCheckError`. |
+| `config.py` | The JSON config: special-label styles and the per-repo `repos` → project-board mapping. |
+| `render.py` | Pure presentation: ANSI/width primitives, `terminal_tree`/`markdown_tree` and `sprint_table`/`sprint_markdown`. |
+| `cli.py` | Argument parsing and wiring (`--sprint` selects the board view); turns `IssueCheckError` into a clean exit. |
 
 ## Design & docs
 
 | File | What it is |
 | --- | --- |
-| [`MVP.md`](./MVP.md) | The built slice: scope, data layer, columns, hierarchy, acceptance. |
+| [`MVP.md`](./MVP.md) | The default ("yours") slice: scope, data layer, columns, hierarchy, acceptance. |
+| [`SPRINT.md`](./SPRINT.md) | The `--sprint` slice: board data layer, buckets, columns, config, acceptance. |
 | [`DECISIONS.md`](./DECISIONS.md) | Decision log with rationale. |

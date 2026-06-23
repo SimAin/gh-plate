@@ -88,6 +88,38 @@ budget, justified because the signal is one the user explicitly asked to surface
 
 ---
 
+## D6 — Sprint view from a Projects v2 board (per-repo, server-side current iteration)
+
+**Decision:** A second view, `issue-check --sprint`, renders one repo's GitHub
+Projects v2 board scoped to its **current iteration** — a *team* view (every issue in
+the sprint, not just mine), grouped `yours` → `others` → `unassigned`, sorted
+active-first by board Status. The repo→project mapping lives in a per-repo `repos`
+block in the existing global config; the default view is unchanged.
+
+**Why:** A team uses a project board as a sprint board, and "what's in our current
+sprint, and who has it?" is a distinct question from the default "what's on my plate?"
+The board is the source of truth for sprint membership and status, so the view reads
+it directly rather than re-deriving a sprint from issue fields. Scope is per-repo
+(config, not hardcoded) because only some repos have such a board.
+
+**Why server-side `iteration:@current`:** The board holds thousands of historical
+items across past iterations and has no REST sub-issue data. Probing the live board
+showed `projectV2.items(query:)` accepts the board's own filter syntax and that
+`iteration:@current` resolves the active iteration from its dates GitHub-side — so the
+view is **one cheap query** for ~15 items, with no client-side date math and no
+scan of the full board. Including Done/closed items is then free (board items carry no
+state filter). This mirrors D4's "let the API do the work" stance.
+
+**Consequence:** `github.fetch_sprint_items` is a second impure entry point;
+`model.build_sprint_view` (pure) buckets + sorts; `render.sprint_table` /
+`sprint_markdown` reuse the existing primitives; `config` parses the `repos` block and
+project URLs. A board can span repos, so items are filtered to the requested repo
+client-side, and PR/draft board items are dropped (issue-centric view). The Assignee
+column — cut from the default view as all-"me" (see `MVP.md`) — returns here as signal.
+See `SPRINT.md` for the built slice.
+
+---
+
 ## Standing decisions carried from the architecture discussion
 
 - **Standalone, not a shared package.** The GraphQL fetch layer is specific enough
