@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from issue_check import render
-from issue_check.model import IssueRow, TreeNode
+from issue_check.model import IssueRow, SprintRow, SprintView, TreeNode
 
 
 def make_row(
@@ -270,3 +270,97 @@ def test_markdown_owned_row_has_glyph_and_meta() -> None:
     out = render.markdown_tree([TreeNode(row, 0)])
     assert out.startswith("- • [#5]")
     assert "3mo" in out and "bug" in out and "2c" in out
+
+
+# --- sprint view -------------------------------------------------------------
+
+
+def make_sprint_row(
+    number: int,
+    *,
+    title: str = "Title",
+    assignees: list[str] | None = None,
+    status: str | None = "Backlog",
+    is_mine: bool = False,
+    is_unassigned: bool = False,
+    age_days: int = 3,
+    is_stale: bool = False,
+    labels: list[str] | None = None,
+    comments: int = 0,
+    sub_total: int = 0,
+    sub_completed: int = 0,
+    pr_state: str | None = None,
+    pr_number: int | None = None,
+) -> SprintRow:
+    return SprintRow(
+        number=number,
+        url=f"https://github.com/an-org/a-repo/issues/{number}",
+        title=title,
+        labels=labels or [],
+        comments_count=comments,
+        age_days=age_days,
+        is_stale=is_stale,
+        sub_total=sub_total,
+        sub_completed=sub_completed,
+        assignees=assignees or [],
+        status=status,
+        is_mine=is_mine,
+        is_unassigned=is_unassigned,
+        pr_state=pr_state,
+        pr_number=pr_number,
+    )
+
+
+def _view() -> SprintView:
+    return SprintView(
+        title="Sprint 7",
+        yours=[make_sprint_row(3, title="Mine", assignees=["me"], is_mine=True,
+                               status="🚀 Shipping", pr_state="open", pr_number=99)],
+        others=[make_sprint_row(2, title="Theirs", assignees=["a-teammate"],
+                                status="🛠 Building")],
+        unassigned=[make_sprint_row(1, title="Free", is_unassigned=True)],
+    )
+
+
+def test_strip_emoji_keeps_words() -> None:
+    assert render.strip_emoji("🚀 Shipping") == "Shipping"
+    assert render.strip_emoji("Backlog") == "Backlog"
+
+
+def test_sprint_table_has_title_and_three_dividers() -> None:
+    out = render.sprint_table(_view(), use_color=False)
+    assert "Sprint 7  ·  current sprint" in out
+    for label in ("── yours", "── others", "── unassigned"):
+        assert label in out
+    # title divider precedes the yours divider
+    assert out.index("current sprint") < out.index("── yours")
+
+
+def test_sprint_table_has_assignee_and_stripped_status() -> None:
+    out = render.sprint_table(_view(), use_color=False)
+    assert "Assignee" in out and "Status" in out
+    assert "a-teammate" in out
+    assert "Shipping" in out and "Building" in out
+    assert "🚀" not in out and "🛠" not in out   # emoji stripped in terminal
+
+
+def test_sprint_table_plain_when_color_off() -> None:
+    out = render.sprint_table(_view(), use_color=False)
+    assert "\033[" not in out   # no ANSI when colour disabled
+
+
+def test_sprint_markdown_sections_and_emoji_kept() -> None:
+    out = render.sprint_markdown(_view())
+    assert "## Sprint 7 · current sprint" in out
+    assert "### yours" in out and "### others" in out and "### unassigned" in out
+    assert "[#3](https://github.com/an-org/a-repo/issues/3)" in out
+    assert "@a-teammate" in out
+    assert "🚀 Shipping" in out             # markdown keeps the emoji
+    assert "⇄ #99 open" in out              # PR marker rendered
+
+
+def test_sprint_markdown_marks_empty_bucket() -> None:
+    view = SprintView(title="S", yours=[], others=[], unassigned=[
+        make_sprint_row(1, is_unassigned=True)])
+    out = render.sprint_markdown(view)
+    assert "### yours\n- *none*" in out
