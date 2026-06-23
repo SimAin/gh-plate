@@ -212,3 +212,121 @@ def test_subtree_of_only_undated_nodes_sorts_last() -> None:
         )
     )
     assert [n.row.number for n in forest] == [3, 10]
+
+
+# --- sprint view -------------------------------------------------------------
+
+
+def make_item(
+    number: int,
+    *,
+    repo: str = "an-org/a-repo",
+    typename: str = "Issue",
+    title: str = "Item",
+    assignees: list[str] | None = None,
+    status: str | None = "Backlog",
+    iteration: str | None = "Sprint 7",
+    updated_days_ago: int | None = 0,
+    sub_total: int = 0,
+    sub_completed: int = 0,
+    prs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    content: dict[str, Any] = {"__typename": typename}
+    if typename == "Issue":
+        content.update(
+            {
+                "number": number,
+                "title": title,
+                "url": f"https://github.com/{repo}/issues/{number}",
+                "updatedAt": _ts(updated_days_ago),
+                "state": "OPEN",
+                "repository": {"nameWithOwner": repo},
+                "assignees": {"nodes": [{"login": a} for a in (assignees or [])]},
+                "labels": {"nodes": []},
+                "comments": {"totalCount": 0},
+                "subIssuesSummary": {"total": sub_total, "completed": sub_completed},
+                "parent": None,
+                "closedByPullRequestsReferences": {"nodes": prs or []},
+            }
+        )
+    item: dict[str, Any] = {"content": content}
+    item["status"] = {"name": status} if status is not None else None
+    item["iteration"] = {"title": iteration} if iteration is not None else None
+    return item
+
+
+def sprint(items: list[dict[str, Any]], *, login: str = "me", **kwargs: Any):
+    return model.build_sprint_view(
+        items,
+        login=login,
+        repo=kwargs.pop("repo", "an-org/a-repo"),
+        now=NOW,
+        stale_days=kwargs.pop("stale_days", 14),
+        status_order=kwargs.pop("status_order", ()),
+    )
+
+
+def test_sprint_buckets_by_assignee() -> None:
+    view = sprint(
+        [
+            make_item(1, assignees=["me"]),
+            make_item(2, assignees=["other"]),
+            make_item(3, assignees=[]),
+            make_item(4, assignees=["other", "me"]),  # multi-assignee incl. me
+        ]
+    )
+    assert [r.number for r in view.yours] == [4, 1]   # both mine, by number desc
+    assert [r.number for r in view.others] == [2]
+    assert [r.number for r in view.unassigned] == [3]
+
+
+def test_sprint_sorts_active_first_by_status_order() -> None:
+    order = ["In progress", "In review", "Backlog"]
+    view = sprint(
+        [
+            make_item(1, assignees=["me"], status="Backlog"),
+            make_item(2, assignees=["me"], status="In progress"),
+            make_item(3, assignees=["me"], status="In review"),
+            make_item(4, assignees=["me"], status="Mystery"),  # unlisted -> last
+        ],
+        status_order=order,
+    )
+    assert [r.number for r in view.yours] == [2, 3, 1, 4]
+
+
+def test_sprint_drops_other_repos_and_non_issues() -> None:
+    view = sprint(
+        [
+            make_item(1, assignees=["me"]),
+            make_item(2, assignees=["me"], repo="an-org/other"),  # wrong repo
+            make_item(3, typename="PullRequest"),                  # not an issue
+        ]
+    )
+    assert [r.number for r in view.yours] == [1]
+    assert view.others == [] and view.unassigned == []
+
+
+def test_sprint_title_from_first_item_and_status_preserved() -> None:
+    view = sprint([make_item(1, assignees=["me"], status="🚀 Shipping")])
+    assert view.title == "Sprint 7"
+    assert view.yours[0].status == "🚀 Shipping"   # raw, emoji kept
+
+
+def test_sprint_title_survives_repo_filter() -> None:
+    # An active sprint whose only items are in another repo: no rows, but the
+    # title is still known (so the CLI can say "empty sprint", not "no sprint").
+    view = sprint([make_item(1, assignees=["me"], repo="an-org/other")])
+    assert view.is_empty
+    assert view.title == "Sprint 7"
+
+
+def test_sprint_no_active_sprint_has_no_title() -> None:
+    # No active iteration: the board's @current filter returns nothing at all.
+    view = sprint([])
+    assert view.is_empty
+    assert view.title is None
+
+
+def test_sprint_empty_when_no_matching_items() -> None:
+    view = sprint([make_item(1, typename="PullRequest")])
+    assert view.is_empty

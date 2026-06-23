@@ -175,3 +175,119 @@ def fetch_assigned_issues(
         cursor = page.get("endCursor")
         if not page.get("hasNextPage") or not cursor:
             return issues, total
+
+
+# Sprint view: one Projects v2 board, filtered server-side to its *current*
+# iteration. The board's ``items(query:)`` argument takes the same filter syntax
+# as the board search bar, and ``<field>:@current`` resolves the active iteration
+# from its dates GitHub-side — so we fetch only the current sprint (a handful of
+# items) in one page, with no client-side date math. ``content`` carries the full
+# Issue (the same fields the yours-view uses) and ``fieldValueByName`` reads the
+# board's Status + Iteration values. The board can span repos, so the model
+# filters items to the requested repo; PR/draft items are dropped there too.
+def _sprint_query(
+    owner: str, owner_type: str, number: int, sprint_field: str, status_field: str
+) -> str:
+    root = "organization" if owner_type == "organization" else "user"
+    # ``json.dumps`` yields a valid GraphQL string literal (quoted + escaped), so
+    # an owner or field name containing a quote can't break out of the query. The
+    # number is an int, safe to interpolate directly.
+    owner_lit = json.dumps(owner)
+    status_lit = json.dumps(status_field)
+    sprint_lit = json.dumps(sprint_field)
+    return f"""
+query($q: String!, $endCursor: String) {{
+  {root}(login: {owner_lit}) {{
+    projectV2(number: {number}) {{
+      items(first: 100, after: $endCursor, query: $q) {{
+        pageInfo {{ hasNextPage endCursor }}
+        nodes {{
+          content {{
+            __typename
+            ... on Issue {{
+              number title url updatedAt state
+              repository {{ nameWithOwner }}
+              assignees(first: 10) {{ nodes {{ login }} }}
+              labels(first: 10) {{ nodes {{ name }} }}
+              comments {{ totalCount }}
+              subIssuesSummary {{ total completed }}
+              parent {{ number }}
+              closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {{
+                nodes {{ number state isDraft }}
+              }}
+            }}
+          }}
+          status: fieldValueByName(name: {status_lit}) {{
+            ... on ProjectV2ItemFieldSingleSelectValue {{ name }}
+          }}
+          iteration: fieldValueByName(name: {sprint_lit}) {{
+            ... on ProjectV2ItemFieldIterationValue {{ title }}
+          }}
+        }}
+      }}
+    }}
+  }}
+}}
+"""
+
+
+def sprint_filter(sprint_field: str) -> str:
+    """The board ``items(query:)`` token for the current sprint.
+
+    The board filter language keys off the iteration field's name (lowercased);
+    for GitHub's default ``Iteration`` field this is ``iteration:@current``.
+    """
+    token = sprint_field.strip().lower() or "iteration"
+    return f"{token}:@current"
+
+
+def fetch_sprint_items(
+    owner: str,
+    owner_type: str,
+    number: int,
+    sprint_field: str,
+    status_field: str,
+) -> list[dict[str, Any]]:
+    """Current-sprint items of a Projects v2 board, paginating as needed."""
+    query_str = _sprint_query(owner, owner_type, number, sprint_field, status_field)
+    q = sprint_filter(sprint_field)
+    root_key = "organization" if owner_type == "organization" else "user"
+    items: list[dict[str, Any]] = []
+    cursor: str | None = None
+
+    while True:
+        args = [
+            "gh", "api", "graphql",
+            "-f", f"query={query_str}",
+            "-f", f"q={q}",
+        ]
+        if cursor:
+            args += ["-f", f"endCursor={cursor}"]
+
+        result = _run(args)
+        if result.returncode != 0:
+            raise IssueCheckError(
+                f"gh failed to fetch project {owner}/{number}:\n"
+                f"{result.stderr.strip()}"
+            )
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise IssueCheckError(f"Could not parse gh response: {exc}") from exc
+        if payload.get("errors"):
+            raise IssueCheckError("GraphQL error: " + json.dumps(payload["errors"]))
+
+        root = (payload.get("data") or {}).get(root_key) or {}
+        project = root.get("projectV2")
+        if project is None:
+            raise IssueCheckError(
+                f"No project #{number} found for {owner} "
+                "(check the project URL and that `gh` has read:project scope)."
+            )
+        connection = project.get("items") or {}
+        items.extend(node for node in (connection.get("nodes") or []) if node)
+
+        page = connection.get("pageInfo") or {}
+        cursor = page.get("endCursor")
+        if not page.get("hasNextPage") or not cursor:
+            return items
