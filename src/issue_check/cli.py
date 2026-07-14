@@ -12,7 +12,7 @@ import argparse
 import sys
 from datetime import UTC, datetime
 
-from . import config, github, render
+from . import __version__, config, github, render
 from .github import IssueCheckError
 from .model import build_forest, build_index
 
@@ -24,6 +24,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="issue-check",
         description="Status table for open GitHub issues assigned to you.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
         "--repo",
