@@ -149,7 +149,9 @@ def format_age(age_days: int | None) -> str:
         return f"{age_days}d"
     if age_days < 70:
         return f"{age_days // 7}w"
-    return f"{age_days // 30}mo"
+    if age_days < 365:
+        return f"{age_days // 30}mo"
+    return f"{age_days // 365}y"
 
 
 def escape_markdown_cell(value: str) -> str:

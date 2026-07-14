@@ -61,6 +61,13 @@ def test_format_age_units() -> None:
     assert render.format_age(None) == ""
 
 
+def test_format_age_year_boundaries() -> None:
+    assert render.format_age(364) == "12mo"
+    assert render.format_age(365) == "1y"
+    assert render.format_age(729) == "1y"
+    assert render.format_age(730) == "2y"
+
+
 def test_truncate_uses_ellipsis() -> None:
     assert render.truncate("hello world", 8) == "hello w…"
     assert render.truncate("short", 10) == "short"
