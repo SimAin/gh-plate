@@ -80,7 +80,7 @@ D2 rightly refuses), the meaning lives in **user config**: opt-in, per-user, eas
 to update. The default behaviour stays agnostic apart from the one obvious case.
 
 **Consequence:** A new `config.py` reads JSON (stdlib-only, preserving zero deps
-and the 3.9 floor) from `$ISSUE_CHECK_CONFIG` or `~/.config/issue-check/config.json`.
+and the 3.11 floor) from `$ISSUE_CHECK_CONFIG` or `~/.config/issue-check/config.json`.
 Matching is case-insensitive with `*` globs (`status:*`). The model/render layers
 stay pure — the resolver is passed in from the CLI. Colour is now spent in the
 Labels cell as well as on health: an accepted, intentional widening of the colour

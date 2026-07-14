@@ -8,7 +8,7 @@ the user's control and is easy to update — that is the whole point.
 The one module that reads a config file. Kept apart from the GitHub I/O so the
 model/render layers stay pure; failures surface as :class:`IssueCheckError`.
 
-Config is JSON (stdlib-parseable on the 3.9 floor, no new dependency) mapping a
+Config is JSON (stdlib-parseable on the 3.11 floor, no new dependency) mapping a
 label name to a *style*. Matching is case-insensitive and supports ``*`` globs
 for prefixed schemes (``status:*``)::
 
