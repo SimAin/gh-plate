@@ -20,6 +20,8 @@ from .model import (
     PR_MERGED,
     PR_OPEN,
     STALE,
+    SprintRow,
+    SprintView,
     TreeNode,
     flatten,
     issue_state,
@@ -37,6 +39,14 @@ _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 # OSC-8 hyperlink sequences: ESC ] 8 ; params ; URI  ST  (ST = ESC \ or BEL).
 # Stripped for width math so a linked #num still measures as its visible text.
 _OSC8_RE = re.compile(r"\033\]8;[^\033\007]*(?:\033\\|\007)")
+# Literal emoji, plus the variation-selector (U+FE0F) and ZWJ (U+200D) that
+# decorate them. Board Status values often carry an emoji prefix (e.g. a board
+# might name a column "🚀 Shipping"); emoji are double-width, which the column
+# math (code-point counts) can't account for, so the terminal Status cell strips
+# them. Markdown keeps them. Escapes are spelled out so the class stays legible.
+_EMOJI_RE = re.compile(
+    "[\U0001f000-\U0001faff\U00002600-\U000027bf\ufe0f\u200d]+"
+)
 
 MIN_TREE_WIDTH = 30
 MAX_TREE_WIDTH = 90
@@ -44,6 +54,11 @@ AGE_W = 4
 LABELS_W = 18
 PROG_W = 4
 CMT_W = 3
+
+# Sprint view adds Assignee + Status columns; Labels is narrowed to fit.
+ASSIGNEE_W = 12
+STATUS_W = 14
+SPRINT_LABELS_W = 14
 
 STATE_GLYPHS = {STALE: ("•", SOFT_GOLD), ACTIVE: ("✓", SOFT_GREEN)}
 STATE_LABELS = {STALE: "stale", ACTIVE: "active"}
@@ -156,6 +171,11 @@ def format_age(age_days: int | None) -> str:
 
 def escape_markdown_cell(value: str) -> str:
     return value.replace("|", r"\|")
+
+
+def strip_emoji(value: str) -> str:
+    """Drop literal emoji (and their selectors) — for the terminal Status cell."""
+    return _EMOJI_RE.sub("", value).strip()
 
 
 def _pack_labels(labels: list[str], width: int) -> str:
@@ -382,6 +402,175 @@ def markdown_tree(
         lines.append(f"{indent}- {glyph} {link} {title}{suffix}")
 
     return "\n".join(lines)
+
+
+# --- sprint view -------------------------------------------------------------
+#
+# Same table discipline as the yours-view, but grouped into three assignee
+# buckets (yours / others / unassigned) under a sprint-name title, with Assignee
+# and Status columns added. ``yours`` rows are full-weight with a health glyph +
+# PR marker; ``others``/``unassigned`` are dimmed whole — the weight-is-attention
+# axis again. Each bucket is pre-sorted active-first by the model.
+
+def _sprint_issue_width(term: int) -> int:
+    fixed = AGE_W + ASSIGNEE_W + STATUS_W + SPRINT_LABELS_W + PROG_W + CMT_W
+    separators = 2 * 6  # seven columns, six gaps
+    return max(MIN_TREE_WIDTH, min(term - fixed - separators, MAX_TREE_WIDTH))
+
+
+def _sprint_issue_cell(row: SprintRow, width: int, use_color: bool) -> str:
+    """``<glyph><pr> <#num> <title>`` for a sprint row, sized before colour.
+
+    ``yours`` rows lead with a health glyph + PR marker (mirroring the tree
+    cell, minus indentation); ``others``/``unassigned`` use a neutral ``·`` and
+    are dimmed whole by the caller.
+    """
+    num = f"#{row.number}"
+    if row.is_mine:
+        state = STALE if row.is_stale else ACTIVE
+        glyph, color = STATE_GLYPHS[state]
+        pr = _pr_marker(row.pr_state, use_color)
+        head = len(glyph) + 1 + 1 + 1 + len(num) + 1
+        title = truncate(row.title, max(0, width - head))
+        linked = hyperlink(dim(num, use_color), row.url, use_color)
+        return f"{colorize(glyph, color, use_color)} {pr} {linked} {title}"
+    head = len(CONTEXT_GLYPH) + 3 + len(num) + 1
+    title = truncate(row.title, max(0, width - head))
+    linked = hyperlink(num, row.url, use_color)
+    return f"{CONTEXT_GLYPH}   {linked} {title}"
+
+
+def _sprint_columns(issue_w: int) -> list[tuple[str, int, str]]:
+    """The sprint table layout — one source for the header and every row.
+
+    ``issue_w`` is computed from the terminal width; the rest are fixed. Both the
+    header and :func:`_sprint_row_line` consume this so widths stay in lock-step.
+    """
+    return [
+        ("Issue", issue_w, "left"),
+        ("Age", AGE_W, "right"),
+        ("Assignee", ASSIGNEE_W, "left"),
+        ("Status", STATUS_W, "left"),
+        ("Labels", SPRINT_LABELS_W, "left"),
+        ("Prog", PROG_W, "right"),
+        ("Cmt", CMT_W, "right"),
+    ]
+
+
+def _sprint_row_line(
+    row: SprintRow,
+    columns: list[tuple[str, int, str]],
+    use_color: bool,
+    resolver: Callable[[str], str | None] | None,
+) -> str:
+    """One sprint row, laid out against ``columns`` (see :func:`_sprint_columns`).
+
+    ``yours`` rows colour the Age (rose when stale) and promote special labels;
+    ``others``/``unassigned`` carry the same data plain, then dim the whole line.
+    """
+    issue = _sprint_issue_cell(row, columns[0][1], use_color)
+    age_text = format_age(row.age_days)
+    assignee = row.assignees[0] if row.assignees else "—"
+    status = strip_emoji(row.status or "")
+    prog = f"{row.sub_completed}/{row.sub_total}" if row.has_children else ""
+    cmt = str(row.comments_count)
+
+    if row.is_mine:
+        age = (
+            colorize(age_text, SOFT_ROSE, use_color)
+            if row.is_stale
+            else dim(age_text, use_color)
+        )
+        labels = format_labels(row.labels, SPRINT_LABELS_W, use_color, resolver)
+        values = [issue, age, assignee, status, labels,
+                  dim(prog, use_color), dim(cmt, use_color)]
+        return "  ".join(
+            format_cell(v, w, a)
+            for v, (_, w, a) in zip(values, columns, strict=True)
+        )
+
+    # others / unassigned: same data, plain, then dimmed whole.
+    values = [issue, age_text, assignee, status,
+              _pack_labels(row.labels, SPRINT_LABELS_W), prog, cmt]
+    line = "  ".join(
+        format_cell(v, w, a)
+        for v, (_, w, a) in zip(values, columns, strict=True)
+    )
+    return dim(line, use_color)
+
+
+def sprint_table(
+    view: SprintView,
+    use_color: bool,
+    resolver: Callable[[str], str | None] | None = None,
+) -> str:
+    columns = _sprint_columns(_sprint_issue_width(terminal_width()))
+    total = sum(w for _, w, _ in columns) + 2 * (len(columns) - 1)
+    header = "  ".join(format_cell(n, w, a) for n, w, a in columns)
+    title = f"{view.title}  ·  current sprint" if view.title else "current sprint"
+    lines = [bold(header, use_color), _divider(title, total, use_color)]
+
+    for name, rows in (
+        ("yours", view.yours),
+        ("others", view.others),
+        ("unassigned", view.unassigned),
+    ):
+        lines.append(_divider(name, total, use_color))
+        for row in rows:
+            lines.append(_sprint_row_line(row, columns, use_color, resolver))
+
+    return "\n".join(line.rstrip() for line in lines)
+
+
+def sprint_markdown(
+    view: SprintView,
+    resolver: Callable[[str], str | None] | None = None,
+) -> str:
+    resolve = resolver or _no_style
+    title = f"{view.title} · current sprint" if view.title else "current sprint"
+    lines: list[str] = [f"## {title}", ""]
+    for name, rows in (
+        ("yours", view.yours),
+        ("others", view.others),
+        ("unassigned", view.unassigned),
+    ):
+        lines.append(f"### {name}")
+        if not rows:
+            lines.append("- *none*")
+        for row in rows:
+            link = f"[#{row.number}]({row.url})" if row.url else f"#{row.number}"
+            glyph = (
+                STATE_GLYPHS[STALE if row.is_stale else ACTIVE][0]
+                if row.is_mine
+                else CONTEXT_GLYPH
+            )
+            meta: list[str] = [
+                f"@{row.assignees[0]}" if row.assignees else "unassigned"
+            ]
+            if row.status:
+                meta.append(row.status)  # markdown keeps the emoji
+            if row.pr_state:
+                pr_glyph = PR_GLYPHS[row.pr_state][0]
+                word = PR_MD_WORDS[row.pr_state]
+                ref = f" #{row.pr_number}" if row.pr_number else ""
+                meta.append(f"{pr_glyph}{ref} {word}")
+            age = format_age(row.age_days)
+            if age:
+                meta.append(age)
+            if row.has_children:
+                meta.append(f"{row.sub_completed}/{row.sub_total}")
+            if row.labels:
+                specials = [n for n in row.labels if resolve(n) in LABEL_STYLE_COLORS]
+                ordinary = [n for n in row.labels if resolve(n) is None]
+                shown = [f"**{n}**" for n in specials] + ordinary
+                if shown:
+                    meta.append(", ".join(shown))
+            if row.comments_count:
+                meta.append(f"{row.comments_count}c")
+            suffix = " · " + " · ".join(meta) if meta else ""
+            lines.append(f"- {glyph} {link} {row.title}{suffix}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 # --- key ---------------------------------------------------------------------

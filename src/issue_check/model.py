@@ -20,6 +20,7 @@ Context (un-owned) nodes carry no health state.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -317,3 +318,153 @@ def flatten(forest: list[TreeNode]) -> list[TreeNode]:
     for node in forest:
         walk(node)
     return out
+
+
+# --- sprint view -------------------------------------------------------------
+#
+# The ``--sprint`` view consumes Projects v2 board items (see
+# ``github.fetch_sprint_items``) rather than the issue forest. It is *not* a tree:
+# items are grouped into three assignee buckets — yours, others, unassigned — each
+# a flat list sorted active-first by board Status. ``status`` keeps the board's raw
+# value (emoji and all); the terminal renderer strips the emoji, markdown keeps it.
+
+
+@dataclass(frozen=True)
+class SprintRow:
+    """One current-sprint board item, normalized for the sprint view."""
+
+    number: int
+    url: str
+    title: str
+    labels: list[str]
+    comments_count: int
+    age_days: int | None
+    is_stale: bool
+    sub_total: int
+    sub_completed: int
+    assignees: list[str]
+    status: str | None
+    is_mine: bool
+    is_unassigned: bool
+    pr_state: str | None = None
+    pr_number: int | None = None
+
+    @property
+    def has_children(self) -> bool:
+        return self.sub_total > 0
+
+
+@dataclass
+class SprintView:
+    """The three assignee buckets of a sprint, plus the sprint's display name."""
+
+    title: str | None
+    yours: list[SprintRow]
+    others: list[SprintRow]
+    unassigned: list[SprintRow]
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.yours or self.others or self.unassigned)
+
+
+def status_rank(status: str | None, status_order: Sequence[str]) -> int:
+    """Sort key for the active-first Status order: listed first, rest last."""
+    if status is not None and status in status_order:
+        return status_order.index(status)
+    return len(status_order)
+
+
+def _item_assignees(content: dict[str, Any]) -> list[str]:
+    nodes = (content.get("assignees") or {}).get("nodes") or []
+    return [
+        node["login"]
+        for node in nodes
+        if isinstance(node, dict) and isinstance(node.get("login"), str)
+    ]
+
+
+def _field_value(item: dict[str, Any], key: str, subkey: str) -> str | None:
+    """Read a non-empty string from ``item[key][subkey]`` (a project fieldValue)."""
+    value = item.get(key)
+    if isinstance(value, dict):
+        inner = value.get(subkey)
+        if isinstance(inner, str) and inner:
+            return inner
+    return None
+
+
+def build_sprint_view(
+    items: list[dict[str, Any]],
+    *,
+    login: str,
+    repo: str,
+    now: datetime | None,
+    stale_days: int,
+    status_order: Sequence[str],
+) -> SprintView:
+    """Project board items -> a :class:`SprintView` of three sorted buckets.
+
+    Non-issue items (PRs, drafts) and items belonging to a different repository
+    than ``repo`` are dropped — the board can span repos. The sprint title is the
+    iteration value of the first surviving item. Each bucket sorts active-first by
+    ``status_order`` (ties by issue number, descending).
+    """
+    # The sprint title comes from any item's iteration value — read it before the
+    # repo/issue filtering so an active-but-empty sprint (a real iteration with no
+    # issues for this repo) still reports its name, letting the CLI tell that case
+    # apart from "no active sprint at all".
+    title: str | None = None
+    for item in items:
+        title = _field_value(item, "iteration", "title")
+        if title is not None:
+            break
+
+    rows: list[SprintRow] = []
+    for item in items:
+        # Belt-and-braces (#2): under a correct ``@current`` filter every item
+        # carries an iteration value, so one that doesn't wasn't really matched
+        # by the sprint filter — drop it rather than render it as "this sprint".
+        if _field_value(item, "iteration", "title") is None:
+            continue
+        content = item.get("content") or {}
+        if content.get("__typename") != "Issue":
+            continue
+        repo_name = (content.get("repository") or {}).get("nameWithOwner")
+        if repo_name != repo:
+            continue
+        assignees = _item_assignees(content)
+        age = age_in_days(content.get("updatedAt"), now)
+        sub_total, sub_completed = _sub_summary(content)
+        pr_state, pr_number = dominant_pr(content)
+        rows.append(
+            SprintRow(
+                number=int(content.get("number", 0)),
+                url=str(content.get("url") or ""),
+                title=compact_text(content.get("title")),
+                labels=_labels(content),
+                comments_count=_comments_count(content),
+                age_days=age,
+                is_stale=age is not None and age >= stale_days,
+                sub_total=sub_total,
+                sub_completed=sub_completed,
+                assignees=assignees,
+                status=_field_value(item, "status", "name"),
+                is_mine=login in assignees,
+                is_unassigned=not assignees,
+                pr_state=pr_state,
+                pr_number=pr_number,
+            )
+        )
+
+    def sort_key(row: SprintRow) -> tuple[int, int]:
+        return (status_rank(row.status, status_order), -row.number)
+
+    return SprintView(
+        title=title,
+        yours=sorted((r for r in rows if r.is_mine), key=sort_key),
+        others=sorted(
+            (r for r in rows if not r.is_mine and not r.is_unassigned), key=sort_key
+        ),
+        unassigned=sorted((r for r in rows if r.is_unassigned), key=sort_key),
+    )

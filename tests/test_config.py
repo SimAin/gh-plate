@@ -58,3 +58,106 @@ def test_malformed_json_is_rejected(tmp_path) -> None:
 def test_config_path_honours_env(monkeypatch) -> None:
     monkeypatch.setenv("ISSUE_CHECK_CONFIG", "/custom/loc.json")
     assert config.config_path() == "/custom/loc.json"
+
+
+# --- sprint board (repos block) ----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("https://github.com/orgs/an-org/projects/2", ("an-org", "organization", 2)),
+        ("https://github.com/users/a-user/projects/5", ("a-user", "user", 5)),
+        (
+            "https://github.com/orgs/an-org/projects/2/views/2",
+            ("an-org", "organization", 2),
+        ),
+        ("an-org/projects/7", ("an-org", "organization", 7)),
+        (
+            "  https://github.com/orgs/an-org/projects/2  ",
+            ("an-org", "organization", 2),
+        ),
+    ],
+)
+def test_parse_project_url(value, expected) -> None:
+    assert config.parse_project_url(value) == expected
+
+
+def test_parse_project_url_rejects_garbage() -> None:
+    with pytest.raises(IssueCheckError, match="Could not parse project reference"):
+        config.parse_project_url("https://example.com/not-a-project")
+
+
+def test_repos_block_parses_with_defaults(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "repos": {
+                    "an-org/a-repo": {
+                        "project": "https://github.com/orgs/an-org/projects/2"
+                    }
+                }
+            }
+        )
+    )
+    cfg = config.load_config(str(path))
+    project = cfg.project_for("an-org/a-repo")
+    assert project is not None
+    assert (project.owner, project.owner_type, project.number) == (
+        "an-org",
+        "organization",
+        2,
+    )
+    assert project.sprint_field == "Iteration"   # GitHub defaults
+    assert project.status_field == "Status"
+    assert project.status_order == ()
+    assert cfg.project_for("an-org/other-repo") is None
+
+
+def test_repos_block_honours_field_and_status_overrides(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "repos": {
+                    "an-org/a-repo": {
+                        "project": "an-org/projects/2",
+                        "sprintField": "Sprint",
+                        "statusField": "Column",
+                        "statusOrder": ["In progress", "Todo"],
+                    }
+                }
+            }
+        )
+    )
+    project = config.load_config(str(path)).project_for("an-org/a-repo")
+    assert project is not None
+    assert project.sprint_field == "Sprint"
+    assert project.status_field == "Column"
+    assert project.status_order == ("In progress", "Todo")
+
+
+def test_repos_requires_project(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"repos": {"an-org/a-repo": {}}}))
+    with pytest.raises(IssueCheckError, match='needs a "project"'):
+        config.load_config(str(path))
+
+
+def test_repos_status_order_must_be_list_of_strings(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "repos": {
+                    "an-org/a-repo": {
+                        "project": "an-org/projects/2",
+                        "statusOrder": "In progress",
+                    }
+                }
+            }
+        )
+    )
+    with pytest.raises(IssueCheckError, match='"statusOrder" must be a list'):
+        config.load_config(str(path))

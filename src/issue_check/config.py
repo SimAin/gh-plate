@@ -26,6 +26,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -40,10 +41,62 @@ LABEL_STYLES = ("alert", "warn", "info", "hide")
 # any config exists. Override or extend by writing the config file.
 DEFAULT_LABEL_STYLES: dict[str, str] = {"blocked": "alert"}
 
+# GitHub's own default field names for a Projects v2 board. Used when a repo's
+# ``project`` entry doesn't name the sprint/status fields explicitly.
+DEFAULT_SPRINT_FIELD = "Iteration"
+DEFAULT_STATUS_FIELD = "Status"
+
+# Project references: a board URL (org or user), or shorthand ``OWNER/projects/N``.
+_PROJECT_URL_RE = re.compile(
+    r"^(?:https?://github\.com/)?(?P<kind>orgs|users)/"
+    r"(?P<owner>[^/]+)/projects/(?P<num>\d+)"
+)
+_PROJECT_SHORT_RE = re.compile(r"^(?P<owner>[^/]+)/projects/(?P<num>\d+)$")
+
+
+@dataclass(frozen=True)
+class ProjectConfig:
+    """Where a repo's sprint board lives, and which fields drive the view.
+
+    ``owner_type`` is ``"organization"`` or ``"user"`` — the GraphQL root used to
+    reach the project. ``status_order`` lists statuses front-to-back for the
+    active-first sort; anything unlisted sorts last (see ``model.status_rank``).
+    """
+
+    owner: str
+    owner_type: str
+    number: int
+    sprint_field: str = DEFAULT_SPRINT_FIELD
+    status_field: str = DEFAULT_STATUS_FIELD
+    status_order: tuple[str, ...] = ()
+
+
+def parse_project_url(value: str) -> tuple[str, str, int]:
+    """Parse a project reference into ``(owner, owner_type, number)``.
+
+    Accepts ``https://github.com/orgs/OWNER/projects/N`` (and the ``users/``
+    form), with any trailing ``/views/M`` etc., plus shorthand
+    ``OWNER/projects/N`` (assumed an org). Raises :class:`IssueCheckError`.
+    """
+    text = value.strip()
+    match = _PROJECT_URL_RE.match(text)
+    if match:
+        owner_type = "organization" if match.group("kind") == "orgs" else "user"
+        return match.group("owner"), owner_type, int(match.group("num"))
+    match = _PROJECT_SHORT_RE.match(text)
+    if match:
+        return match.group("owner"), "organization", int(match.group("num"))
+    raise IssueCheckError(
+        f"Could not parse project reference {value!r}. Expected a URL like "
+        "https://github.com/orgs/OWNER/projects/N (or .../users/OWNER/projects/N), "
+        "or shorthand OWNER/projects/N."
+    )
+
 
 @dataclass
 class Config:
     label_styles: dict[str, str] = field(default_factory=dict)
+    projects: dict[str, ProjectConfig] = field(default_factory=dict)
 
     def style_for(self, label: str) -> str | None:
         """The style for ``label``: case-insensitive, with ``*`` glob support."""
@@ -55,6 +108,10 @@ class Config:
                 return style
         return None
 
+    def project_for(self, repo: str) -> ProjectConfig | None:
+        """The sprint-board config for ``OWNER/REPO``, or ``None`` if unmapped."""
+        return self.projects.get(repo)
+
 
 def config_path() -> str:
     """The resolved config location: ``$ISSUE_CHECK_CONFIG`` or the XDG default."""
@@ -63,6 +120,40 @@ def config_path() -> str:
         return env
     base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     return os.path.join(base, "issue-check", "config.json")
+
+
+def _parse_repo_settings(repo: Any, settings: Any) -> ProjectConfig:
+    """Validate one ``repos`` entry into a :class:`ProjectConfig`."""
+    if not isinstance(settings, dict):
+        raise IssueCheckError(f"Config for repo {repo!r} must be an object.")
+    project = settings.get("project")
+    if not isinstance(project, str) or not project.strip():
+        raise IssueCheckError(
+            f'Repo {repo!r} needs a "project" reference '
+            "(e.g. https://github.com/orgs/OWNER/projects/N)."
+        )
+    owner, owner_type, number = parse_project_url(project)
+    sprint_field = settings.get("sprintField", DEFAULT_SPRINT_FIELD)
+    status_field = settings.get("statusField", DEFAULT_STATUS_FIELD)
+    if not isinstance(sprint_field, str) or not isinstance(status_field, str):
+        raise IssueCheckError(
+            f'Repo {repo!r}: "sprintField" and "statusField" must be strings.'
+        )
+    raw_order = settings.get("statusOrder", [])
+    if not isinstance(raw_order, list) or not all(
+        isinstance(item, str) for item in raw_order
+    ):
+        raise IssueCheckError(
+            f'Repo {repo!r}: "statusOrder" must be a list of status names.'
+        )
+    return ProjectConfig(
+        owner=owner,
+        owner_type=owner_type,
+        number=number,
+        sprint_field=sprint_field,
+        status_field=status_field,
+        status_order=tuple(raw_order),
+    )
 
 
 def parse_config(data: Any) -> Config:
@@ -80,7 +171,17 @@ def parse_config(data: Any) -> Config:
                 f"Valid styles: {', '.join(LABEL_STYLES)}."
             )
         styles[str(name).strip().lower()] = style
-    return Config(label_styles=styles)
+
+    projects: dict[str, ProjectConfig] = {}
+    repos = data.get("repos", {})
+    if not isinstance(repos, dict):
+        raise IssueCheckError(
+            'Config "repos" must be an object of OWNER/REPO -> settings.'
+        )
+    for repo, settings in repos.items():
+        projects[str(repo)] = _parse_repo_settings(repo, settings)
+
+    return Config(label_styles=styles, projects=projects)
 
 
 def load_config(path: str | None = None) -> Config:
