@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.1](https://github.com/SimAin/gh-issue-check/compare/v0.4.0...v0.4.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **sprint:** give --show-key a sprint-specific key ([7acfcb8](https://github.com/SimAin/gh-issue-check/commit/7acfcb86d9795fdce3faaca2c881eb4bf9de379e))
+* **sprint:** honour "hide" label styles on others/unassigned rows ([0e3db7c](https://github.com/SimAin/gh-issue-check/commit/0e3db7c530bee1cde9d66ed9b993a035e4e87980))
+* **sprint:** match and validate statusOrder against what the user sees ([2306473](https://github.com/SimAin/gh-issue-check/commit/2306473f58cf9382abe61e7ecc76c2c1a0f74ce3))
+* **sprint:** match repos config keys case-insensitively ([82ffdfd](https://github.com/SimAin/gh-issue-check/commit/82ffdfd283f2130f27f412bd2dbf953da9a9ea92))
+
 ## [0.4.0](https://github.com/SimAin/gh-issue-check/compare/v0.3.0...v0.4.0) (2026-07-14)
 
 
