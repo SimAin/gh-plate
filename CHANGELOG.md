@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.0](https://github.com/SimAin/gh-issue-check/compare/v0.3.0...v0.4.0) (2026-07-14)
+
+
+### Features
+
+* current-sprint board data layer and model ([c5585c4](https://github.com/SimAin/gh-issue-check/commit/c5585c4512a9dc37a4a5eb8579a8955c2fda5120))
+* per-repo project board config ([20e5aef](https://github.com/SimAin/gh-issue-check/commit/20e5aefe4750bc729e3bb9a1738d2d47d5e068c9))
+* sprint view (--sprint) ([0a7290b](https://github.com/SimAin/gh-issue-check/commit/0a7290b8203c7ebf3fb02d96a58c4dd6fe1d92f9))
+* sprint view rendering and --sprint CLI ([ac99436](https://github.com/SimAin/gh-issue-check/commit/ac9943677e5d3c27a29e1cca86778588fefcbef3))
+
+
+### Bug Fixes
+
+* **sprint:** validate configured board fields before fetching items ([740c9bb](https://github.com/SimAin/gh-issue-check/commit/740c9bbd78ee3f15f9241d3e3ca9f7a4b58deb3e))
+
+
+### Documentation
+
+* sprint view (SPRINT.md, README, decision log) ([f0135e5](https://github.com/SimAin/gh-issue-check/commit/f0135e587592ad05941c482c5e46117f78a7ba2a))
+
 ## [0.3.0](https://github.com/SimAin/gh-issue-check/compare/v0.2.0...v0.3.0) (2026-07-14)
 
 
