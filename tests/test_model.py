@@ -327,6 +327,18 @@ def test_sprint_no_active_sprint_has_no_title() -> None:
     assert view.title is None
 
 
+def test_sprint_drops_items_missing_iteration_value() -> None:
+    # Belt-and-braces (#2): an item without an iteration value wasn't matched by
+    # the ``@current`` filter, so it must not render as the current sprint.
+    view = sprint(
+        [
+            make_item(1, assignees=["me"], iteration="Sprint 7"),
+            make_item(2, assignees=["me"], iteration=None),
+        ]
+    )
+    assert [r.number for r in view.yours] == [1]
+
+
 def test_sprint_empty_when_no_matching_items() -> None:
     view = sprint([make_item(1, typename="PullRequest")])
     assert view.is_empty

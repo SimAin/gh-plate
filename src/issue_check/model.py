@@ -422,6 +422,11 @@ def build_sprint_view(
 
     rows: list[SprintRow] = []
     for item in items:
+        # Belt-and-braces (#2): under a correct ``@current`` filter every item
+        # carries an iteration value, so one that doesn't wasn't really matched
+        # by the sprint filter — drop it rather than render it as "this sprint".
+        if _field_value(item, "iteration", "title") is None:
+            continue
         content = item.get("content") or {}
         if content.get("__typename") != "Issue":
             continue
