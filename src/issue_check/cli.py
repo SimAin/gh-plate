@@ -116,7 +116,10 @@ def run(args: argparse.Namespace) -> int:
         print(render.terminal_tree(forest, use_color, cfg.style_for))
 
     if len(issues) == args.limit and total > args.limit:
-        print(f"\nNote: showing {args.limit} of {total} assigned issues.")
+        print(
+            f"\nNote: showing {args.limit} of {total} assigned issues.",
+            file=sys.stderr,
+        )
     return 0
 
 
