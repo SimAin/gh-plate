@@ -602,3 +602,39 @@ def symbol_key(use_color: bool) -> str:
             ),
         ]
     )
+
+
+def sprint_key(use_color: bool) -> str:
+    """The ``--show-key`` text for ``--sprint`` — distinct from :func:`symbol_key`.
+
+    Sprint rows aren't a parent/child tree: each row is a board item bucketed
+    into ``yours`` / ``others`` / ``unassigned`` (see :func:`sprint_table`).
+    ``yours`` rows carry a health glyph + PR marker like the yours-view;
+    ``others``/``unassigned`` rows use the neutral ``·`` and are dimmed whole,
+    so the glyph there means "someone else's or unassigned row", not the
+    yours-view's "parent not assigned to you".
+    """
+    states = "   ".join(
+        f"{colorize(STATE_GLYPHS[s][0], STATE_GLYPHS[s][1], use_color)} "
+        f"{STATE_LABELS[s]}"
+        for s in (STALE, ACTIVE)
+    )
+    prs = "   ".join(
+        f"{_pr_marker(s, use_color)} {PR_LABELS[s]}"
+        for s in (PR_OPEN, PR_DRAFT, PR_MERGED, PR_CLOSED)
+    )
+    return "\n".join(
+        [
+            bold("Key", use_color),
+            "  State   " + states
+            + f"   {CONTEXT_GLYPH} someone else's / unassigned row (dimmed)",
+            "  PR      " + prs + "   (yours rows only)",
+            dim(
+                "  Rows are grouped yours -> others -> unassigned · "
+                "yours rows are full-weight, others/unassigned are dimmed whole · "
+                "Prog = completed/total sub-issues · Age in rose = stale · "
+                "Status has emoji stripped in the terminal (kept in markdown)",
+                use_color,
+            ),
+        ]
+    )

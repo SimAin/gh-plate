@@ -198,7 +198,7 @@ def _run_sprint(
     else:
         use_color = _use_color(args)
         if args.show_key:
-            print(render.symbol_key(use_color))
+            print(render.sprint_key(use_color))
             print()
         print(render.sprint_table(view, use_color, cfg.style_for))
     return 0
