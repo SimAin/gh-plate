@@ -349,6 +349,37 @@ def test_sprint_table_plain_when_color_off() -> None:
     assert "\033[" not in out   # no ANSI when colour disabled
 
 
+def test_sprint_table_hides_hidden_label_on_others_row() -> None:
+    resolver = {"wontfix": "hide"}.get
+    view = SprintView(
+        title="S",
+        yours=[],
+        others=[make_sprint_row(2, title="Theirs", assignees=["a-teammate"],
+                                labels=["wontfix", "bug"])],
+        unassigned=[],
+    )
+    out = render.sprint_table(view, use_color=False, resolver=resolver)
+    assert "wontfix" not in out
+    assert "bug" in out
+
+
+def test_sprint_table_others_row_colour_label_not_promoted() -> None:
+    # colour/promotion stays mine-only: an "alert"-styled label on an others
+    # row is packed plainly like any other label, then dimmed with the row.
+    resolver = {"blocked": "alert"}.get
+    view = SprintView(
+        title="S",
+        yours=[],
+        others=[make_sprint_row(2, title="Theirs", assignees=["a-teammate"],
+                                labels=["bug", "blocked"])],
+        unassigned=[],
+    )
+    out = render.sprint_table(view, use_color=True, resolver=resolver)
+    assert render.SOFT_ROSE not in out   # no colour promotion on others rows
+    visible = render.visible_text(out)
+    assert "bug" in visible and "blocked" in visible
+
+
 def test_sprint_markdown_sections_and_emoji_kept() -> None:
     out = render.sprint_markdown(_view())
     assert "## Sprint 7 · current sprint" in out
