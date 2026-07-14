@@ -109,8 +109,12 @@ class Config:
         return None
 
     def project_for(self, repo: str) -> ProjectConfig | None:
-        """The sprint-board config for ``OWNER/REPO``, or ``None`` if unmapped."""
-        return self.projects.get(repo)
+        """The sprint-board config for ``OWNER/REPO``, or ``None`` if unmapped.
+
+        Matching is case-insensitive: GitHub treats ``OWNER/REPO`` case-
+        insensitively, and the casing of a git remote is arbitrary.
+        """
+        return self.projects.get(str(repo).strip().lower())
 
 
 def config_path() -> str:
@@ -179,7 +183,7 @@ def parse_config(data: Any) -> Config:
             'Config "repos" must be an object of OWNER/REPO -> settings.'
         )
     for repo, settings in repos.items():
-        projects[str(repo)] = _parse_repo_settings(repo, settings)
+        projects[str(repo).strip().lower()] = _parse_repo_settings(repo, settings)
 
     return Config(label_styles=styles, projects=projects)
 
