@@ -6,6 +6,8 @@ fallback, so these tests never shell out.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from issue_check import github
@@ -67,11 +69,32 @@ def _fields() -> list[dict[str, str]]:
     ]
 
 
+def _fields_with_status_options() -> list[dict[str, Any]]:
+    """A board whose Status field carries real (emoji-prefixed) options."""
+    return [
+        {"name": "Sprint", "dataType": "ITERATION"},
+        {
+            "name": "Status",
+            "dataType": "SINGLE_SELECT",
+            "options": [
+                {"name": "🚀 Priority"},
+                {"name": "In progress"},
+                {"name": "Backlog"},
+            ],
+        },
+    ]
+
+
 def test_fields_query_uses_org_root_and_common_fragment() -> None:
     query = github._fields_query("an-org", "organization", 3)
     assert 'organization(login: "an-org")' in query
     assert "projectV2(number: 3)" in query
     assert "... on ProjectV2FieldCommon { name dataType }" in query
+
+
+def test_fields_query_includes_single_select_options() -> None:
+    query = github._fields_query("an-org", "organization", 3)
+    assert "... on ProjectV2SingleSelectField { options { name } }" in query
 
 
 def test_fields_query_uses_user_root() -> None:
@@ -129,3 +152,41 @@ def test_validate_board_fields_rejects_multiword_sprint_field() -> None:
     message = str(excinfo.value)
     assert "single-word" in message
     assert "sprint cycle:@current" in message  # shows the broken token
+
+
+# --- statusOrder validation (#7) ----------------------------------------------
+
+
+def test_validate_board_fields_accepts_normalized_status_order() -> None:
+    # Configured as displayed ("Priority", any case) against a board option
+    # that carries an emoji ("🚀 Priority") — the same normalisation as
+    # model.status_rank, so this must not raise.
+    github.validate_board_fields(
+        _fields_with_status_options(),
+        "Sprint",
+        "Status",
+        ("Priority", "BACKLOG", "in progress"),
+    )
+
+
+def test_validate_board_fields_ignores_status_order_when_not_given() -> None:
+    # No status_order passed -> defaults to () -> validation is skipped entirely,
+    # matching every other existing call site of validate_board_fields.
+    github.validate_board_fields(_fields_with_status_options(), "Sprint", "Status")
+
+
+def test_validate_board_fields_rejects_unknown_status_order_entry() -> None:
+    with pytest.raises(github.IssueCheckError) as excinfo:
+        github.validate_board_fields(
+            _fields_with_status_options(),
+            "Sprint",
+            "Status",
+            ("Priority", "Blocked"),
+        )
+    message = str(excinfo.value)
+    assert "statusOrder" in message and '"Blocked"' in message
+    # the board's real options are listed, emoji-stripped (what the user sees)
+    assert '"Priority"' in message
+    assert '"In progress"' in message
+    assert '"Backlog"' in message
+    assert "🚀" not in message

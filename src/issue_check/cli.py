@@ -161,14 +161,16 @@ def _run_sprint(
             f"config ({args.config or config.config_path()}). See the README."
         )
 
-    # One cheap fields query first: validate the configured field names against
-    # the board's real fields, so a misconfiguration fails fast with an
-    # actionable error instead of silently dumping the whole board (#2, #4).
+    # One cheap fields query first: validate the configured field names — and
+    # each configured statusOrder entry against the status field's real
+    # options — against the board's real fields, so a misconfiguration fails
+    # fast with an actionable error instead of silently dumping the whole
+    # board (#2, #4) or silently degrading the active-first sort (#7).
     fields = github.fetch_project_fields(
         project.owner, project.owner_type, project.number
     )
     github.validate_board_fields(
-        fields, project.sprint_field, project.status_field
+        fields, project.sprint_field, project.status_field, project.status_order
     )
 
     items = github.fetch_sprint_items(
