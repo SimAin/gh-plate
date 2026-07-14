@@ -364,3 +364,17 @@ def test_sprint_markdown_marks_empty_bucket() -> None:
         make_sprint_row(1, is_unassigned=True)])
     out = render.sprint_markdown(view)
     assert "### yours\n- *none*" in out
+
+
+def test_sprint_key_names_bucket_order_and_others_glyph() -> None:
+    out = render.sprint_key(use_color=False)
+    assert "Key" in out
+    assert "yours" in out and "others" in out and "unassigned" in out
+    assert "yours -> others -> unassigned" in out
+    assert "someone else's / unassigned row" in out
+    assert "parent not assigned to you" not in out
+
+
+def test_sprint_key_plain_when_color_off() -> None:
+    out = render.sprint_key(use_color=False)
+    assert "\033[" not in out
