@@ -10,7 +10,10 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from collections.abc import Sequence
 from typing import Any
+
+from .model import normalize_status, strip_emoji
 
 # One repo-wide query, filtered to the current user server-side. Sub-issue
 # fields (``parent``, ``subIssuesSummary``) are GraphQL-only — they are not in
@@ -305,14 +308,17 @@ def fetch_sprint_items(
 
 # Board-field validation. Before fetching sprint items we ask the board what
 # fields it actually has and check the configured names against them. This turns
-# two silent failure modes into instant, actionable errors:
+# three silent failure modes into instant, actionable errors:
 #   * a misconfigured ``sprintField`` no longer makes ``items(query:)`` filter
 #     nothing and dump the whole board as "the current sprint" (#2);
 #   * a multi-word iteration field name — the exact case ``sprintField`` exists
 #     for — is rejected here rather than silently emitting a broken filter token
 #     (#4). The board filter language only quotes *values* (``status:"In
 #     progress"``), never the qualifier/field-name, so ``sprint cycle:@current``
-#     can't be expressed; we say so instead of guessing.
+#     can't be expressed; we say so instead of guessing;
+#   * a misspelled ``statusOrder`` entry no longer silently drops out of the
+#     active-first sort — it is checked against the status field's real
+#     options up front (#7).
 ITERATION_DATATYPE = "ITERATION"
 SINGLE_SELECT_DATATYPE = "SINGLE_SELECT"
 _DATATYPE_LABELS = {
@@ -322,7 +328,15 @@ _DATATYPE_LABELS = {
 
 
 def _fields_query(owner: str, owner_type: str, number: int) -> str:
-    """GraphQL for a board's field names + data types (one cheap query)."""
+    """GraphQL for a board's field names + data types (one cheap query).
+
+    Single-select fields (the Status field, typically) also carry their
+    ``options`` — the board's real values, used to validate a configured
+    ``statusOrder`` up front (see :func:`validate_board_fields`). ``options``
+    is a plain list on ``ProjectV2SingleSelectField`` (confirmed via the
+    GitHub GraphQL schema: no pagination arguments), so no ``first`` is
+    needed.
+    """
     root = "organization" if owner_type == "organization" else "user"
     owner_lit = json.dumps(owner)
     return f"""
@@ -333,6 +347,7 @@ query {{
         nodes {{
           __typename
           ... on ProjectV2FieldCommon {{ name dataType }}
+          ... on ProjectV2SingleSelectField {{ options {{ name }} }}
         }}
       }}
     }}
@@ -344,7 +359,11 @@ query {{
 def fetch_project_fields(
     owner: str, owner_type: str, number: int
 ) -> list[dict[str, Any]]:
-    """The board's fields as ``[{"name", "dataType"}, ...]`` (I/O; see ``_run``)."""
+    """The board's fields as ``[{"name", "dataType", ...}, ...]`` (I/O; see ``_run``).
+
+    Single-select fields additionally carry an ``"options"`` key (a list of
+    ``{"name": ...}``) — the field's real values, in board order.
+    """
     query_str = _fields_query(owner, owner_type, number)
     root_key = "organization" if owner_type == "organization" else "user"
     result = _run(["gh", "api", "graphql", "-f", f"query={query_str}"])
@@ -418,14 +437,63 @@ def _require_field(
         )
 
 
+def _single_select_options(fields: list[dict[str, Any]], field_name: str) -> list[str]:
+    """The real option names (emoji intact) of the single-select field named
+    ``field_name``, board order. Empty if the field isn't found or carries no
+    ``options`` (e.g. the fields payload predates this query's options clause).
+    """
+    wanted = field_name.strip().lower()
+    for candidate in fields:
+        name = candidate.get("name")
+        if isinstance(name, str) and name.strip().lower() == wanted:
+            options = candidate.get("options") or []
+            return [
+                option["name"]
+                for option in options
+                if isinstance(option, dict) and isinstance(option.get("name"), str)
+            ]
+    return []
+
+
+def _validate_status_order(
+    fields: list[dict[str, Any]], status_field: str, status_order: Sequence[str]
+) -> None:
+    """Check each configured ``statusOrder`` entry against the status field's
+    real options.
+
+    Compared via :func:`issue_check.model.normalize_status` — the same
+    emoji-strip + case-fold the active-first sort applies (see
+    ``model.status_rank``) — so an entry written as displayed ("Priority")
+    matches a board option that carries an emoji ("🚀 Priority"). The listed
+    real options are shown emoji-stripped too, since that's what the user sees
+    on screen, not the board's raw GraphQL value.
+    """
+    options = _single_select_options(fields, status_field)
+    normalized_options = {normalize_status(option) for option in options}
+    displayed = _format_names([strip_emoji(option) for option in options])
+    for entry in status_order:
+        if normalize_status(entry) not in normalized_options:
+            raise IssueCheckError(
+                f'Configured statusOrder entry "{entry}" does not match any '
+                f'option of the "{status_field}" field. Its options: '
+                f"{displayed}."
+            )
+
+
 def validate_board_fields(
-    fields: list[dict[str, Any]], sprint_field: str, status_field: str
+    fields: list[dict[str, Any]],
+    sprint_field: str,
+    status_field: str,
+    status_order: Sequence[str] = (),
 ) -> None:
     """Validate the configured sprint/status fields against the board's fields.
 
     Pure (no I/O): the caller fetches ``fields`` via :func:`fetch_project_fields`
     and passes them in, so this is unit-tested directly. Raises the first
     :class:`IssueCheckError` found; returns ``None`` when the config is sound.
+    ``status_order``, when given, is validated too (see
+    :func:`_validate_status_order`) — a misspelled entry fails fast here
+    instead of silently degrading the active-first sort at render time.
     """
     _require_field(fields, sprint_field, ITERATION_DATATYPE, "sprintField")
     # The field exists and is an iteration field — but if its name is multi-word
@@ -443,3 +511,5 @@ def validate_board_fields(
             "match."
         )
     _require_field(fields, status_field, SINGLE_SELECT_DATATYPE, "statusField")
+    if status_order:
+        _validate_status_order(fields, status_field, status_order)

@@ -368,11 +368,51 @@ class SprintView:
         return not (self.yours or self.others or self.unassigned)
 
 
+# Literal emoji, plus the variation-selector (U+FE0F) and ZWJ (U+200D) that
+# decorate them. Board Status values often carry an emoji prefix (e.g. a board
+# might name a column "🚀 Shipping"); emoji are double-width, which terminal
+# column math (code-point counts) can't account for, so the terminal Status
+# cell strips them via :func:`strip_emoji`. Markdown keeps them. ``status_rank``
+# and ``github.validate_board_fields`` also fold through this (via
+# :func:`normalize_status`) so a configured ``statusOrder`` entry matches what
+# the user actually sees on screen, not the board's raw (possibly
+# emoji-prefixed) name. Escapes are spelled out so the class stays legible.
+_EMOJI_RE = re.compile(
+    "[\U0001f000-\U0001faff\U00002600-\U000027bf\ufe0f\u200d]+"
+)
+
+
+def strip_emoji(value: str) -> str:
+    """Drop literal emoji (and their selectors) — for the terminal Status cell."""
+    return _EMOJI_RE.sub("", value).strip()
+
+
+def normalize_status(status: str) -> str:
+    """Fold a status name for comparison: emoji-stripped, then case-folded.
+
+    The one normalisation both :func:`status_rank` and
+    ``github.validate_board_fields`` apply, so a ``statusOrder`` entry written
+    as the user sees it on screen (``"Priority"``) matches a raw board name
+    that carries an emoji (``"🚀 Priority"``) — on both sides of the ranking
+    comparison, and in the up-front validation that checks configured entries
+    against the board's real options.
+    """
+    return strip_emoji(status).casefold()
+
+
 def status_rank(status: str | None, status_order: Sequence[str]) -> int:
-    """Sort key for the active-first Status order: listed first, rest last."""
-    if status is not None and status in status_order:
-        return status_order.index(status)
-    return len(status_order)
+    """Sort key for the active-first Status order: listed first, rest last.
+
+    Compared emoji-stripped + case-folded on both sides (see
+    :func:`normalize_status`), so a ``statusOrder`` entry configured as
+    displayed ("Priority") matches a board Status that carries an emoji
+    ("🚀 Priority").
+    """
+    if status is None:
+        return len(status_order)
+    normalized = normalize_status(status)
+    order = [normalize_status(entry) for entry in status_order]
+    return order.index(normalized) if normalized in order else len(status_order)
 
 
 def _item_assignees(content: dict[str, Any]) -> list[str]:

@@ -26,6 +26,7 @@ from .model import (
     flatten,
     issue_state,
     progress_text,
+    strip_emoji,
 )
 
 # xterm-256 soft tints — muted hues so a coloured glyph reads as signal, not noise.
@@ -39,14 +40,6 @@ _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 # OSC-8 hyperlink sequences: ESC ] 8 ; params ; URI  ST  (ST = ESC \ or BEL).
 # Stripped for width math so a linked #num still measures as its visible text.
 _OSC8_RE = re.compile(r"\033\]8;[^\033\007]*(?:\033\\|\007)")
-# Literal emoji, plus the variation-selector (U+FE0F) and ZWJ (U+200D) that
-# decorate them. Board Status values often carry an emoji prefix (e.g. a board
-# might name a column "🚀 Shipping"); emoji are double-width, which the column
-# math (code-point counts) can't account for, so the terminal Status cell strips
-# them. Markdown keeps them. Escapes are spelled out so the class stays legible.
-_EMOJI_RE = re.compile(
-    "[\U0001f000-\U0001faff\U00002600-\U000027bf\ufe0f\u200d]+"
-)
 
 MIN_TREE_WIDTH = 30
 MAX_TREE_WIDTH = 90
@@ -171,11 +164,6 @@ def format_age(age_days: int | None) -> str:
 
 def escape_markdown_cell(value: str) -> str:
     return value.replace("|", r"\|")
-
-
-def strip_emoji(value: str) -> str:
-    """Drop literal emoji (and their selectors) — for the terminal Status cell."""
-    return _EMOJI_RE.sub("", value).strip()
 
 
 def _pack_labels(labels: list[str], width: int) -> str:

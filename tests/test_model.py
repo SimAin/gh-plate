@@ -280,6 +280,30 @@ def test_sprint_buckets_by_assignee() -> None:
     assert [r.number for r in view.unassigned] == [3]
 
 
+def test_strip_emoji_keeps_words() -> None:
+    assert model.strip_emoji("🚀 Shipping") == "Shipping"
+    assert model.strip_emoji("Backlog") == "Backlog"
+
+
+def test_normalize_status_strips_emoji_and_casefolds() -> None:
+    assert model.normalize_status("🚀 Priority") == "priority"
+    assert model.normalize_status("PRIORITY") == "priority"
+    assert model.normalize_status("priority") == "priority"
+
+
+def test_status_rank_matches_configured_order_after_emoji_strip_and_casefold() -> None:
+    # A user configures statusOrder as displayed ("Priority"); the raw board
+    # name carries an emoji ("🚀 Priority") and different casing shows up too —
+    # both must resolve to the same rank as an exact match would.
+    order = ["Priority", "Backlog"]
+    assert model.status_rank("🚀 Priority", order) == 0
+    assert model.status_rank("PRIORITY", order) == 0
+    assert model.status_rank("priority", order) == 0
+    assert model.status_rank("Backlog", order) == 1
+    assert model.status_rank("Mystery", order) == len(order)
+    assert model.status_rank(None, order) == len(order)
+
+
 def test_sprint_sorts_active_first_by_status_order() -> None:
     order = ["In progress", "In review", "Backlog"]
     view = sprint(
@@ -292,6 +316,20 @@ def test_sprint_sorts_active_first_by_status_order() -> None:
         status_order=order,
     )
     assert [r.number for r in view.yours] == [2, 3, 1, 4]
+
+
+def test_sprint_sorts_active_first_when_status_order_configured_as_displayed() -> None:
+    # statusOrder is configured against what the terminal shows ("Priority"),
+    # while the board's raw Status value still carries the emoji ("🚀 Priority").
+    view = sprint(
+        [
+            make_item(1, assignees=["me"], status="Backlog"),
+            make_item(2, assignees=["me"], status="🚀 Priority"),
+        ],
+        status_order=["Priority", "Backlog"],
+    )
+    assert [r.number for r in view.yours] == [2, 1]
+    assert view.yours[0].status == "🚀 Priority"  # raw status preserved on the row
 
 
 def test_sprint_drops_other_repos_and_non_issues() -> None:
