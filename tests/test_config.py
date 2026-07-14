@@ -115,6 +115,51 @@ def test_repos_block_parses_with_defaults(tmp_path) -> None:
     assert cfg.project_for("an-org/other-repo") is None
 
 
+def test_project_for_is_case_insensitive(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "repos": {
+                    "An-Org/A-Repo": {
+                        "project": "https://github.com/orgs/an-org/projects/2"
+                    }
+                }
+            }
+        )
+    )
+    cfg = config.load_config(str(path))
+    project = cfg.project_for("an-org/a-repo")
+    assert project is not None
+    assert (project.owner, project.owner_type, project.number) == (
+        "an-org",
+        "organization",
+        2,
+    )
+
+
+def test_project_for_matches_config_key_regardless_of_lookup_casing(
+    tmp_path,
+) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "repos": {
+                    "an-org/a-repo": {
+                        "project": "https://github.com/orgs/an-org/projects/2"
+                    }
+                }
+            }
+        )
+    )
+    cfg = config.load_config(str(path))
+    project = cfg.project_for("AN-ORG/A-REPO")
+    assert project is not None
+    assert project.owner == "an-org"
+    assert cfg.project_for("an-org/other-repo") is None
+
+
 def test_repos_block_honours_field_and_status_overrides(tmp_path) -> None:
     path = tmp_path / "config.json"
     path.write_text(
