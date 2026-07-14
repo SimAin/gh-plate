@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.0](https://github.com/SimAin/gh-issue-check/compare/v0.2.0...v0.3.0) (2026-07-14)
+
+
+### Features
+
+* add a year unit to format_age ([8fb2b55](https://github.com/SimAin/gh-issue-check/commit/8fb2b55b1c51a23bde5d91ca3d5f7be246ee6b7c))
+
+
+### Bug Fixes
+
+* print the truncation note to stderr, not stdout ([e019460](https://github.com/SimAin/gh-issue-check/commit/e01946038bb371178cf4f8c29ce2ef7db1f929e6))
+* raise a clean IssueCheckError when gh or git is not installed ([b16c366](https://github.com/SimAin/gh-issue-check/commit/b16c366cbf141c8043c7d4241ea76f5b13f6f90b))
+* reject non-positive --limit and --stale-days at argparse ([e0aa9cd](https://github.com/SimAin/gh-issue-check/commit/e0aa9cd5dd4eeb9a5a51f250c1b4b2a1591bff9d))
+
+
+### Documentation
+
+* cite the real 3.11 Python floor in config.py and D5 ([023ea7d](https://github.com/SimAin/gh-issue-check/commit/023ea7de28106758d1ad48e3a363ee96de041fe2))
+
 ## [0.2.0](https://github.com/SimAin/gh-issue-check/compare/v0.1.0...v0.2.0) (2026-07-14)
 
 
