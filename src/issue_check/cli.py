@@ -20,6 +20,15 @@ DEFAULT_LIMIT = 500
 DEFAULT_STALE_DAYS = 14
 
 
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(
+            f"must be a positive integer, got '{value}'"
+        )
+    return parsed
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="issue-check",
@@ -36,7 +45,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--limit",
-        type=int,
+        type=_positive_int,
         default=DEFAULT_LIMIT,
         help=f"Maximum issues to fetch. Defaults to {DEFAULT_LIMIT}.",
     )
@@ -54,7 +63,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--stale-days",
-        type=int,
+        type=_positive_int,
         default=DEFAULT_STALE_DAYS,
         help=(
             "Flag an issue stale when not updated in this many days. "
