@@ -1,0 +1,10 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "python",
+      "extra-files": [
+        "src/issue_check/__init__.py"
+      ]
+    }
+  }
+}
