@@ -25,3 +25,8 @@ from issue_check import github
 )
 def test_repo_from_remote_parses_github_urls(remote: str) -> None:
     assert github.repo_from_remote(remote) == "an-org/a-repo"
+
+
+def test_run_missing_binary_raises_issue_check_error() -> None:
+    with pytest.raises(github.IssueCheckError, match="no-such-binary-xyz"):
+        github._run(["no-such-binary-xyz", "--version"])

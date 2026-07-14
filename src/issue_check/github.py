@@ -73,7 +73,17 @@ class IssueCheckError(Exception):
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, check=False, capture_output=True, text=True)
+    binary = args[0]
+    try:
+        return subprocess.run(args, check=False, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        if binary == "gh":
+            hint = (
+                "Install it from https://cli.github.com and run 'gh auth login'."
+            )
+        else:
+            hint = f"Install {binary} and ensure it is on PATH."
+        raise IssueCheckError(f"'{binary}' is not installed. {hint}") from exc
 
 
 def repo_from_remote(remote: str) -> str | None:
