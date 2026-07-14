@@ -489,9 +489,13 @@ def _sprint_row_line(
             for v, (_, w, a) in zip(values, columns, strict=True)
         )
 
-    # others / unassigned: same data, plain, then dimmed whole.
+    # others / unassigned: same data, plain, then dimmed whole. The resolver's
+    # "hide" is still honoured (a promise applied everywhere); promotion/colour
+    # is not, so these rows stay uniformly dim.
+    resolve = resolver or _no_style
+    visible_labels = [name for name in row.labels if resolve(name) != "hide"]
     values = [issue, age_text, assignee, status,
-              _pack_labels(row.labels, SPRINT_LABELS_W), prog, cmt]
+              _pack_labels(visible_labels, SPRINT_LABELS_W), prog, cmt]
     line = "  ".join(
         format_cell(v, w, a)
         for v, (_, w, a) in zip(values, columns, strict=True)
