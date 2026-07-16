@@ -26,6 +26,22 @@ from .model import normalize_status, strip_emoji
 # query. Trees deeper than that lose their topmost ancestors — fine for the
 # shallow epic→task hierarchies this targets.
 #
+# ``repository { nameWithOwner }`` is on ``NodeFields`` — every node, owned
+# issue *and* ancestor alike — because a parent can live in a different repo
+# than its child (GitHub's native sub-issues allow cross-repo hierarchy). The
+# owner-wide view (issue #43) spans repos by construction, so every node needs
+# a repo-qualified identity, and the model's hierarchy guard needs it on
+# ancestors too, to detect a parent living outside the repo(s) being viewed.
+# Inert on today's single-repo view: every node already shares one repo, so
+# this field changes nothing observable yet.
+#
+# ``assignees(first: 10)`` is fetched on owned issues only, not on
+# ``NodeFields`` — context ancestors are pulled in for breadcrumbs, not for
+# who holds them, the same reasoning that already keeps ``labels``/PR refs
+# owned-only. Unused by today's view (which only ever shows "your" issues);
+# groundwork for the owner-wide view (issue #43), where an issue's assignees
+# are exactly the "who" a multi-repo table needs to render.
+#
 # ``closedByPullRequestsReferences`` (with ``includeClosedPrs``) gives the
 # "fix in flight" signal — the PRs linked to an issue, with state + draft flag.
 # It is fetched only on owned issues, not on context ancestors, which carry no
@@ -38,6 +54,7 @@ fragment NodeFields on Issue {
   url
   updatedAt
   subIssuesSummary { total completed }
+  repository { nameWithOwner }
 }
 query($q: String!, $endCursor: String) {
   search(query: $q, type: ISSUE, first: 100, after: $endCursor) {
@@ -48,6 +65,7 @@ query($q: String!, $endCursor: String) {
         ...NodeFields
         labels(first: 10) { nodes { name } }
         comments { totalCount }
+        assignees(first: 10) { nodes { login } }
         closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
           nodes { number state isDraft }
         }
@@ -134,15 +152,22 @@ def current_login() -> str | None:
     return result.stdout.strip() or None
 
 
-def fetch_assigned_issues(
-    repo: str, login: str, limit: int
+def _search_issues(
+    query_str: str, limit: int, error_context: str
 ) -> tuple[list[dict[str, Any]], int]:
-    """Open issues assigned to ``login`` in ``repo``, paginating as needed.
+    """Run :data:`ISSUE_QUERY` against ``query_str``, paginating as needed.
 
-    Returns ``(issues, total_assigned)`` where ``total_assigned`` is the
-    server's own count (used only for the truncation note).
+    Shared by :func:`fetch_assigned_issues` (repo-scoped) and
+    :func:`fetch_owner_issues` (owner-scoped) — both are the same GitHub
+    Issues search under ``ISSUE_QUERY``, differing only in the search
+    qualifiers they build. ``error_context`` is interpolated into the failure
+    message (e.g. a repo or an owner name) so each caller's error stays
+    specific to what it was fetching.
+
+    Returns ``(issues, total)`` where ``total`` is the server's own count
+    (used only for the truncation note) — see :func:`fetch_owner_issues` for
+    why this can exceed what pagination ever delivers.
     """
-    query_str = f"repo:{repo} is:issue is:open assignee:{login}"
     issues: list[dict[str, Any]] = []
     total = 0
     cursor: str | None = None
@@ -159,7 +184,8 @@ def fetch_assigned_issues(
         result = _run(args)
         if result.returncode != 0:
             raise IssueCheckError(
-                f"gh failed to fetch issues for {repo}:\n{result.stderr.strip()}"
+                f"gh failed to fetch issues for {error_context}:\n"
+                f"{result.stderr.strip()}"
             )
         try:
             payload = json.loads(result.stdout)
@@ -178,6 +204,99 @@ def fetch_assigned_issues(
         cursor = page.get("endCursor")
         if not page.get("hasNextPage") or not cursor:
             return issues, total
+
+
+def fetch_assigned_issues(
+    repo: str, login: str, limit: int
+) -> tuple[list[dict[str, Any]], int]:
+    """Open issues assigned to ``login`` in ``repo``, paginating as needed.
+
+    Returns ``(issues, total_assigned)`` where ``total_assigned`` is the
+    server's own count (used only for the truncation note).
+    """
+    query_str = f"repo:{repo} is:issue is:open assignee:{login}"
+    return _search_issues(query_str, limit, repo)
+
+
+def owner_search_query(
+    owner: str, owner_type: str, login: str, *, mine: bool
+) -> str:
+    """The GitHub Issues search string for every open issue across ``owner``.
+
+    ``owner_type`` (``"organization"`` or ``"user"`` — the same vocabulary as
+    ``config.ProjectConfig.owner_type``) picks the qualifier: an organization
+    is searched with ``org:OWNER``, a user account with ``user:OWNER``. When
+    ``mine`` is set, an ``assignee:LOGIN`` term narrows the search to issues
+    assigned to ``login``, mirroring :func:`fetch_assigned_issues`'s
+    single-repo query but scoped to every repo the owner has instead of one.
+
+    ``archived:false`` excludes archived repos by design — an archived repo
+    is done, and its issues are not live work for an owner-wide "what needs
+    attention" view. ``sort:updated-desc`` makes the result deterministic and,
+    when the owner has more issues than fit in one page or under ``--limit``,
+    ensures truncation drops the *least* recently active issues rather than
+    an arbitrary subset — matching the tool's active-first ethos everywhere
+    else (D1, D6).
+    """
+    qualifier = "org" if owner_type == "organization" else "user"
+    query_str = (
+        f"{qualifier}:{owner} is:issue is:open archived:false sort:updated-desc"
+    )
+    if mine:
+        query_str += f" assignee:{login}"
+    return query_str
+
+
+def resolve_owner_type(owner: str) -> str:
+    """Whether ``owner`` is a GitHub organization or a user account.
+
+    One cheap ``gh api users/{owner}`` call, mapping the account's ``.type``
+    (``"Organization"`` / ``"User"``) to the ``"organization"`` / ``"user"``
+    vocabulary the rest of the module uses (see ``config.ProjectConfig``).
+
+    This doubles as up-front validation: an owner that doesn't exist, or that
+    ``gh`` can't see, fails fast here with an actionable message, instead of
+    silently reaching :func:`fetch_owner_issues` and coming back with an
+    empty result that looks like "no open issues" rather than "no such
+    owner".
+    """
+    result = _run(["gh", "api", f"users/{owner}", "--jq", ".type"])
+    if result.returncode != 0:
+        raise IssueCheckError(
+            f"GitHub owner '{owner}' not found or not accessible.\n"
+            "Check the name (an organization or username), and that 'gh' is "
+            "authenticated."
+        )
+    account_type = result.stdout.strip()
+    if account_type == "Organization":
+        return "organization"
+    if account_type == "User":
+        return "user"
+    raise IssueCheckError(
+        f"GitHub owner '{owner}' has an unexpected account type "
+        f"'{account_type}' (expected 'Organization' or 'User')."
+    )
+
+
+def fetch_owner_issues(
+    owner: str, owner_type: str, login: str, limit: int, *, mine: bool
+) -> tuple[list[dict[str, Any]], int]:
+    """Open issues across every repo ``owner`` has, paginating as needed.
+
+    Builds the search string via :func:`owner_search_query` and delegates to
+    :func:`_search_issues` — the same ``ISSUE_QUERY`` shape as the single-repo
+    view, just scoped to an owner instead of one ``repo:``.
+
+    Returns ``(issues, total)`` where ``total`` is the server's own count.
+    GitHub's search API caps any single query at 1000 results, so for a large
+    owner ``total`` can exceed what pagination can ever retrieve — it is not
+    only ever the true count clipped by ``limit``. The CLI (PR 3) compares
+    ``len(issues) < total`` to report "showing X of Y" honestly regardless of
+    which ceiling — ``limit`` or GitHub's own 1000-result cap — did the
+    truncating.
+    """
+    query_str = owner_search_query(owner, owner_type, login, mine=mine)
+    return _search_issues(query_str, limit, owner)
 
 
 # Sprint view: one Projects v2 board, filtered server-side to its *current*
