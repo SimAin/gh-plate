@@ -9,6 +9,7 @@ from issue_check.model import IssueRow, SprintRow, SprintView, TreeNode
 def make_row(
     number: int,
     *,
+    repo: str = "an-org/a-repo",
     mine: bool = True,
     title: str = "Title",
     age_days: int = 30,
@@ -22,8 +23,9 @@ def make_row(
     pr_number: int | None = None,
 ) -> IssueRow:
     return IssueRow(
+        repo=repo,
         number=number,
-        url=f"https://github.com/an-org/a-repo/issues/{number}",
+        url=f"https://github.com/{repo}/issues/{number}",
         title=title,
         labels=labels or [],
         comments_count=comments,
