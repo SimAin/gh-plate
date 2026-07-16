@@ -9,6 +9,11 @@ from issue_check import model
 
 NOW = datetime(2026, 6, 22, tzinfo=UTC)
 
+# The repo assumed to be "queried" throughout — passed as build_index's
+# ``repo`` kwarg via the index() helper below, and used as the fallback repo
+# for any make_issue() payload that doesn't set its own "repository" field.
+REPO = "an-org/a-repo"
+
 
 def _ts(days: int | None) -> str | None:
     if days is None:
@@ -27,6 +32,8 @@ def make_issue(
     sub_completed: int = 0,
     parent: dict[str, Any] | None = None,
     prs: list[dict[str, Any]] | None = None,
+    repo: str | None = None,
+    assignees: list[str] | None = None,
 ) -> dict[str, Any]:
     issue: dict[str, Any] = {
         "number": number,
@@ -40,49 +47,61 @@ def make_issue(
     }
     if parent is not None:
         issue["parent"] = parent
+    # None means "payload doesn't carry this field at all" (the real
+    # yours-view query today) — distinct from an explicit empty list/absent
+    # repo, which still isn't the same as "field present but empty".
+    if repo is not None:
+        issue["repository"] = {"nameWithOwner": repo}
+    if assignees is not None:
+        issue["assignees"] = {"nodes": [{"login": a} for a in assignees]}
     return issue
 
 
+def k(number: int, repo: str = REPO) -> model.IssueKey:
+    """Shorthand for an :data:`model.IssueKey` in the default test repo."""
+    return (repo, number)
+
+
 def index(
-    issues: list[dict[str, Any]], stale_days: int = 14
-) -> dict[int, model.IssueRow]:
-    return model.build_index(issues, now=NOW, stale_days=stale_days)
+    issues: list[dict[str, Any]], stale_days: int = 14, repo: str = REPO
+) -> dict[model.IssueKey, model.IssueRow]:
+    return model.build_index(issues, now=NOW, stale_days=stale_days, repo=repo)
 
 
 # --- normalization -----------------------------------------------------------
 
 def test_emoji_shortcodes_stripped_from_owned_labels() -> None:
     idx = index([make_issue(1, labels=[":cockroach: bug", ":scroll: epic"])])
-    assert idx[1].labels == ["bug", "epic"]
+    assert idx[k(1)].labels == ["bug", "epic"]
 
 
 def test_age_and_staleness() -> None:
     idx = index([make_issue(1, updated_days_ago=3), make_issue(2, updated_days_ago=40)])
-    assert (idx[1].age_days, idx[1].is_stale) == (3, False)
-    assert (idx[2].age_days, idx[2].is_stale) == (40, True)
+    assert (idx[k(1)].age_days, idx[k(1)].is_stale) == (3, False)
+    assert (idx[k(2)].age_days, idx[k(2)].is_stale) == (40, True)
 
 
 def test_stale_days_threshold_is_inclusive() -> None:
     idx = index([make_issue(1, updated_days_ago=14)], stale_days=14)
-    assert idx[1].is_stale is True
+    assert idx[k(1)].is_stale is True
 
 
 def test_missing_timestamp_is_not_stale() -> None:
     idx = index([make_issue(1, updated_days_ago=None)])
-    assert idx[1].age_days is None
-    assert idx[1].is_stale is False
+    assert idx[k(1)].age_days is None
+    assert idx[k(1)].is_stale is False
 
 
 def test_progress_text_only_when_children_present() -> None:
     idx = index([make_issue(1, sub_total=8, sub_completed=3), make_issue(2)])
-    assert model.progress_text(idx[1]) == "3/8"
-    assert model.progress_text(idx[2]) == ""
+    assert model.progress_text(idx[k(1)]) == "3/8"
+    assert model.progress_text(idx[k(2)]) == ""
 
 
 def test_issue_state_two_branches() -> None:
     idx = index([make_issue(1, updated_days_ago=1), make_issue(2, updated_days_ago=99)])
-    assert model.issue_state(idx[1]) == model.ACTIVE
-    assert model.issue_state(idx[2]) == model.STALE
+    assert model.issue_state(idx[k(1)]) == model.ACTIVE
+    assert model.issue_state(idx[k(2)]) == model.STALE
 
 
 # --- linked PRs ("fix in flight") --------------------------------------------
@@ -121,9 +140,9 @@ def test_dominant_pr_none_when_unlinked() -> None:
 def test_pr_state_flows_to_owned_row_but_not_context() -> None:
     epic = make_issue(10, title="Epic")  # ancestor, no PRs of its own here
     idx = index([make_issue(11, parent=epic, prs=[_pr(20, "MERGED")])])
-    assert idx[11].pr_state == model.PR_MERGED
-    assert idx[11].pr_number == 20
-    assert idx[10].pr_state is None  # context ancestor carries no PR marker
+    assert idx[k(11)].pr_state == model.PR_MERGED
+    assert idx[k(11)].pr_number == 20
+    assert idx[k(10)].pr_state is None  # context ancestor carries no PR marker
 
 
 # --- index: owned issues + context ancestors ---------------------------------
@@ -131,12 +150,12 @@ def test_pr_state_flows_to_owned_row_but_not_context() -> None:
 def test_index_materializes_unowned_ancestor_as_context() -> None:
     epic = make_issue(10, title="Epic", sub_total=3, sub_completed=1)
     idx = index([make_issue(11, parent=epic)])
-    assert set(idx) == {10, 11}
-    assert idx[11].mine is True
-    assert idx[10].mine is False          # ancestor not assigned to me
-    assert idx[10].labels == []           # context nodes carry no labels
-    assert idx[10].sub_total == 3         # but do carry their rollup
-    assert idx[11].parent_number == 10
+    assert set(idx) == {k(10), k(11)}
+    assert idx[k(11)].mine is True
+    assert idx[k(10)].mine is False          # ancestor not assigned to me
+    assert idx[k(10)].labels == []           # context nodes carry no labels
+    assert idx[k(10)].sub_total == 3         # but do carry their rollup
+    assert idx[k(11)].parent_number == 10
 
 
 def test_owned_parent_is_not_overwritten_by_context() -> None:
@@ -145,17 +164,104 @@ def test_owned_parent_is_not_overwritten_by_context() -> None:
     idx = index(
         [make_issue(10, title="Epic", sub_total=2), make_issue(11, parent=epic_ctx)]
     )
-    assert idx[10].mine is True
-    assert idx[10].sub_total == 2
+    assert idx[k(10)].mine is True
+    assert idx[k(10)].sub_total == 2
 
 
 def test_two_level_ancestor_chain_is_walked() -> None:
     grandparent = make_issue(100, title="Program")
     parent = make_issue(10, title="Epic", parent=grandparent)
     idx = index([make_issue(11, parent=parent)])
-    assert set(idx) == {11, 10, 100}
-    assert idx[10].parent_number == 100
-    assert idx[100].parent_number is None
+    assert set(idx) == {k(11), k(10), k(100)}
+    assert idx[k(10)].parent_number == 100
+    assert idx[k(100)].parent_number is None
+
+
+# --- index: repo-qualified identity -------------------------------------------
+
+
+def test_index_keeps_same_number_distinct_across_repos() -> None:
+    idx = index(
+        [make_issue(12, repo="repo-a"), make_issue(12, repo="repo-b")]
+    )
+    assert set(idx) == {("repo-a", 12), ("repo-b", 12)}
+    assert idx[("repo-a", 12)].repo == "repo-a"
+    assert idx[("repo-b", 12)].repo == "repo-b"
+
+
+def test_row_repo_falls_back_to_queried_repo_when_payload_omits_repository() -> None:
+    idx = index([make_issue(1)], repo="fallback-org/fallback-repo")
+    assert idx[k(1, repo="fallback-org/fallback-repo")].repo == (
+        "fallback-org/fallback-repo"
+    )
+
+
+def test_cross_repo_ancestor_is_not_materialized_and_child_becomes_root() -> None:
+    # The ancestor lives in a different repo than the owned child -- hierarchy
+    # in this tool is repository-local, so it must not be pulled in as context,
+    # and the walk must not continue further up past it either.
+    epic = make_issue(10, title="Epic", repo="other-org/other-repo")
+    idx = index([make_issue(11, parent=epic)])  # child defaults to REPO
+    assert set(idx) == {k(11)}
+    # A cross-repo parent is nulled at row construction: a bare number from
+    # another repo must never survive into a repo-qualified index.
+    assert idx[k(11)].parent_number is None
+
+    forest = model.build_forest(idx)
+    assert [n.row.number for n in forest] == [11]
+    assert forest[0].children == []
+
+
+def test_cross_repo_parent_number_cannot_link_to_unrelated_same_number_issue() -> None:
+    # REPO happens to contain its own (unrelated, owned) #10, while #11's real
+    # parent is #10 in *another* repo. #11 must be a root -- linking it under
+    # REPO#10 would be a false hierarchy from exactly the number-collision
+    # class repo-qualified identity exists to eliminate.
+    cross_repo_epic = make_issue(10, title="Epic", repo="other-org/other-repo")
+    idx = index(
+        [
+            make_issue(10, title="Unrelated local #10"),
+            make_issue(11, parent=cross_repo_epic),
+        ]
+    )
+    assert set(idx) == {k(10), k(11)}
+    assert idx[k(11)].parent_number is None
+
+    forest = model.build_forest(idx)
+    assert sorted(n.row.number for n in forest) == [10, 11]  # both roots
+    assert all(n.children == [] for n in forest)
+
+
+def test_materialized_ancestor_with_cross_repo_parent_records_no_parent() -> None:
+    # The context ancestor #10 is same-repo (so it *is* materialized), but its
+    # own parent lives elsewhere -- the ancestor row must not carry that bare
+    # number either; the same collision hazard exists one level up.
+    grandparent = make_issue(100, title="Program", repo="other-org/other-repo")
+    parent = make_issue(10, title="Epic", parent=grandparent)
+    idx = index([make_issue(11, parent=parent)])
+    assert set(idx) == {k(11), k(10)}
+    assert idx[k(10)].parent_number is None
+
+
+def test_assignees_parsed_from_payload() -> None:
+    idx = index([make_issue(1, assignees=["alice", "bob"])])
+    assert idx[k(1)].assignees == ["alice", "bob"]
+
+
+def test_assignees_default_to_empty_when_absent() -> None:
+    idx = index([make_issue(1)])  # no "assignees" key at all
+    assert idx[k(1)].assignees == []
+
+
+def test_cross_repo_guard_stops_walk_even_if_grandparent_would_match() -> None:
+    # #100 is (were it reached) in the same repo as the owned child, but the
+    # walk must stop at the first mismatch (#10) and never even look at it.
+    grandparent = make_issue(100, title="Program")
+    parent = make_issue(
+        10, title="Epic", repo="other-org/other-repo", parent=grandparent
+    )
+    idx = index([make_issue(11, parent=parent)])
+    assert set(idx) == {k(11)}
 
 
 # --- forest: shape and ordering ----------------------------------------------
@@ -212,6 +318,52 @@ def test_subtree_of_only_undated_nodes_sorts_last() -> None:
         )
     )
     assert [n.row.number for n in forest] == [3, 10]
+
+
+# --- group_by_repo -------------------------------------------------------------
+
+
+def test_group_by_repo_orders_by_freshest_member_and_builds_correct_trees() -> None:
+    # repo-x's group-floating parent is stale (40d) but its child is fresh (1d),
+    # so repo-x (min age 1) must outrank repo-y (min age 10).
+    epic = make_issue(10, title="Epic", repo="repo-x", updated_days_ago=40)
+    idx = index(
+        [
+            make_issue(11, repo="repo-x", parent=epic, updated_days_ago=1),
+            make_issue(20, repo="repo-y", updated_days_ago=10),
+        ]
+    )
+    sections = model.group_by_repo(idx)
+    assert [name for name, _ in sections] == ["repo-x", "repo-y"]
+
+    repo_x_forest = sections[0][1]
+    assert [n.row.number for n in repo_x_forest] == [10]
+    assert repo_x_forest[0].children[0].row.number == 11
+
+    repo_y_forest = sections[1][1]
+    assert [n.row.number for n in repo_y_forest] == [20]
+
+
+def test_group_by_repo_ties_broken_alphabetically() -> None:
+    idx = index(
+        [
+            make_issue(1, repo="repo-b", updated_days_ago=5),
+            make_issue(2, repo="repo-a", updated_days_ago=5),
+        ]
+    )
+    sections = model.group_by_repo(idx)
+    assert [name for name, _ in sections] == ["repo-a", "repo-b"]
+
+
+def test_group_by_repo_all_undated_repo_sorts_last() -> None:
+    idx = index(
+        [
+            make_issue(1, repo="repo-a", updated_days_ago=None),
+            make_issue(2, repo="repo-b", updated_days_ago=5),
+        ]
+    )
+    sections = model.group_by_repo(idx)
+    assert [name for name, _ in sections] == ["repo-b", "repo-a"]
 
 
 # --- sprint view -------------------------------------------------------------

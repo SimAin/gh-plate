@@ -15,6 +15,17 @@ Scope note: every *owned* node is assigned to you, hence always owned, so the
 full design's ``untriaged`` / ``backlog`` health states cannot occur here;
 :func:`issue_state` resolves only to ``active`` / ``stale`` for owned nodes.
 Context (un-owned) nodes carry no health state.
+
+Identity is repository-qualified: an issue *number* is only unique within its
+own repo, so ``repo-a#12`` and ``repo-b#12`` are different issues that must
+never collide in one index. :data:`IssueKey` — ``(repo, number)`` — is what
+the index and forest actually key on; this is groundwork for an owner-wide
+view spanning several repos (issue #43), not yet wired into the CLI. GitHub
+itself allows a sub-issue to live in a different repo than its parent, but
+this tool's hierarchy is deliberately **repository-local**: :func:`build_index`
+refuses to materialise an ancestor whose repo differs from the owned issue's,
+so a cross-repo child simply renders as a root rather than nesting under a
+parent from another repo's tree.
 """
 
 from __future__ import annotations
@@ -24,6 +35,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+
+# ``(repo, number)`` — the only identity that is unique across repos. An issue
+# *number* alone is only unique within its own repo, so every index/forest in
+# this module keys on this pair rather than on a bare number.
+IssueKey = tuple[str, int]
 
 # Labels in the wild carry literal emoji shortcodes (e.g. ":cockroach: bug").
 # They are noise in a width-constrained column, so we strip them.
@@ -50,8 +66,16 @@ class IssueRow:
     ``mine`` distinguishes an issue assigned to you (full data, health glyph)
     from an ancestor pulled in only for context (``mine=False``: no labels or
     comments, rendered dimmed).
+
+    ``repo`` (``OWNER/REPO``) is what makes ``(repo, number)`` — see
+    :data:`IssueKey` — a safe index key across repos; ``number`` alone is not.
+    ``assignees`` is the issue's assignee logins; it is ``[]`` when the query
+    that produced this row didn't fetch assignees (true of the yours-view
+    query today — it doesn't need them, since every owned issue is assigned to
+    you by construction) or when the issue genuinely has none.
     """
 
+    repo: str
     number: int
     url: str
     title: str
@@ -63,6 +87,7 @@ class IssueRow:
     sub_total: int
     sub_completed: int
     mine: bool
+    assignees: list[str] = field(default_factory=list)
     pr_state: str | None = None   # dominant linked-PR state, or None if unlinked
     pr_number: int | None = None  # the PR backing pr_state (for markdown / links)
 
@@ -109,6 +134,39 @@ def compact_text(value: Any) -> str:
     return " ".join(value.split())
 
 
+def _repo_of(issue: dict[str, Any], default_repo: str) -> str:
+    """``OWNER/REPO`` for ``issue``: its own ``repository`` field, else the fallback.
+
+    Mirrors the module's other defensive dict parsing: a node's own
+    ``repository.nameWithOwner`` wins when present (this is how the cross-repo
+    guard in :func:`build_index` detects a sub-issue living in another repo);
+    otherwise ``default_repo`` (the repo that was actually queried) applies —
+    the yours-view query doesn't currently request ``repository`` on the
+    top-level owned issues, since they're all known to live in the queried
+    repo already.
+    """
+    repository = issue.get("repository")
+    if isinstance(repository, dict):
+        name = repository.get("nameWithOwner")
+        if isinstance(name, str) and name:
+            return name
+    return default_repo
+
+
+def _assignees(issue: dict[str, Any]) -> list[str]:
+    """Assignee logins from ``issue["assignees"]["nodes"]``, or ``[]``.
+
+    Shared by the yours-view rows and the sprint-board rows below — both
+    payload shapes carry assignees the same way.
+    """
+    nodes = (issue.get("assignees") or {}).get("nodes") or []
+    return [
+        node["login"]
+        for node in nodes
+        if isinstance(node, dict) and isinstance(node.get("login"), str)
+    ]
+
+
 def _labels(issue: dict[str, Any]) -> list[str]:
     nodes = (issue.get("labels") or {}).get("nodes") or []
     labels: list[str] = []
@@ -121,10 +179,23 @@ def _labels(issue: dict[str, Any]) -> list[str]:
     return labels
 
 
-def _parent_number(issue: dict[str, Any]) -> int | None:
+def _parent_number(issue: dict[str, Any], repo: str) -> int | None:
+    """The number of ``issue``'s parent — but only when it lives in ``repo``.
+
+    A cross-repo parent is treated as no parent at all: a bare number from
+    another repo is meaningless (and dangerous) in a repo-qualified index,
+    because ``build_forest`` reconstructs the parent key as
+    ``(row.repo, parent_number)`` — if ``repo`` happened to also contain an
+    unrelated issue with that number, the child would be linked under it, a
+    false hierarchy from exactly the number-collision class :data:`IssueKey`
+    exists to eliminate. A parent payload without a ``repository`` field falls
+    back to ``repo`` via :func:`_repo_of` (i.e. same-repo), so payloads that
+    don't carry the field behave as before.
+    """
     parent = issue.get("parent")
     if isinstance(parent, dict) and isinstance(parent.get("number"), int):
-        return int(parent["number"])
+        if _repo_of(parent, repo) == repo:
+            return int(parent["number"])
     return None
 
 
@@ -196,13 +267,16 @@ def _row_from_issue(
     stale_days: int,
     *,
     mine: bool,
+    default_repo: str,
 ) -> IssueRow:
+    repo = _repo_of(issue, default_repo)
     age = age_in_days(issue.get("updatedAt"), now)
     sub_total, sub_completed = _sub_summary(issue)
     # Context ancestors carry no PR marker — they aren't fetched with PR refs
     # and the marker is a "what's being worked on *my* issue" signal.
     pr_state, pr_number = dominant_pr(issue) if mine else (None, None)
     return IssueRow(
+        repo=repo,
         number=int(issue.get("number", 0)),
         url=str(issue.get("url") or ""),
         title=compact_text(issue.get("title")),
@@ -210,10 +284,17 @@ def _row_from_issue(
         comments_count=_comments_count(issue) if mine else 0,
         age_days=age,
         is_stale=age is not None and age >= stale_days,
-        parent_number=_parent_number(issue),
+        # None for a cross-repo parent (see _parent_number) — the row must not
+        # carry a bare number that could collide with an unrelated same-number
+        # issue in its own repo.
+        parent_number=_parent_number(issue, repo),
         sub_total=sub_total,
         sub_completed=sub_completed,
         mine=mine,
+        # Context ancestors carry no assignee data either — same rationale as
+        # labels/comments above (not fetched for them, and not the signal a
+        # dimmed context node is meant to show).
+        assignees=_assignees(issue) if mine else [],
         pr_state=pr_state,
         pr_number=pr_number,
     )
@@ -223,23 +304,48 @@ def build_index(
     issues: list[dict[str, Any]],
     now: datetime | None,
     stale_days: int,
-) -> dict[int, IssueRow]:
-    """Map issue number -> :class:`IssueRow` for owned issues *and* ancestors.
+    *,
+    repo: str,
+) -> dict[IssueKey, IssueRow]:
+    """Map :data:`IssueKey` (``repo``, ``number``) -> :class:`IssueRow`.
 
-    Owned issues (assigned to you) come first and win; each issue's ancestor
-    chain then fills in any parent not already present as an un-owned context
-    node, so the forest can always be rooted.
+    Owned issues (assigned to you) come first and win, keyed by their own
+    ``(row.repo, row.number)`` — ``repo`` is the repo that was queried, used as
+    the fallback when an issue's payload carries no ``repository`` field of its
+    own (true of the yours-view query today, see :func:`_repo_of`). Each
+    issue's ancestor chain then fills in any parent not already present, as an
+    un-owned context node, so the forest can always be rooted.
+
+    **Cross-repo guard:** GitHub allows a sub-issue's parent to live in a
+    different repo, but this tool's hierarchy is repository-local by design —
+    an owner-wide view (issue #43) must be able to trust that a repo's tree
+    only ever nests issues from that same repo. So while walking an owned
+    issue's ancestor chain (nearest first), each ancestor's repo is compared to
+    the owned issue's repo (the ancestor's own ``repository.nameWithOwner`` if
+    present, else the owned issue's repo, via :func:`_repo_of`). The first
+    ancestor whose repo differs is *not* materialised, and the walk stops right
+    there rather than continuing further up — so that child renders as a root
+    rather than nesting under a parent from another repo's tree. The child's
+    row also records ``parent_number=None`` for a cross-repo parent (see
+    :func:`_parent_number`), so its bare parent number can never be mistaken
+    for an unrelated same-number issue in its own repo.
     """
-    index: dict[int, IssueRow] = {}
+    index: dict[IssueKey, IssueRow] = {}
+    owned: list[tuple[dict[str, Any], IssueRow]] = []
     for issue in issues:
-        row = _row_from_issue(issue, now, stale_days, mine=True)
-        index[row.number] = row
-    for issue in issues:
+        row = _row_from_issue(issue, now, stale_days, mine=True, default_repo=repo)
+        index[(row.repo, row.number)] = row
+        owned.append((issue, row))
+    for issue, owned_row in owned:
+        owned_repo = owned_row.repo
         for ancestor in _ancestor_dicts(issue):
-            number = int(ancestor["number"])
-            if number not in index:
-                index[number] = _row_from_issue(
-                    ancestor, now, stale_days, mine=False
+            ancestor_repo = _repo_of(ancestor, owned_repo)
+            if ancestor_repo != owned_repo:
+                break  # cross-repo guard: stop walking, don't materialize
+            key = (ancestor_repo, int(ancestor["number"]))
+            if key not in index:
+                index[key] = _row_from_issue(
+                    ancestor, now, stale_days, mine=False, default_repo=owned_repo
                 )
     return index
 
@@ -258,47 +364,57 @@ def progress_text(row: IssueRow) -> str:
     return f"{row.sub_completed}/{row.sub_total}" if row.has_children else ""
 
 
-def build_forest(index: dict[int, IssueRow]) -> list[TreeNode]:
+def build_forest(index: dict[IssueKey, IssueRow]) -> list[TreeNode]:
     """Assemble ``index`` into a sorted forest.
 
-    A node parents another when its number is that node's ``parent_number`` and
-    it exists in the index; everything else is a root. Siblings (and roots) are
-    ordered *active-subtree first*: by the minimum age anywhere in the subtree,
-    ascending, ties broken by issue number. This floats the cluster you are
-    working in now to the top as a whole unit, while stale clusters sink intact.
-    A node with no age (missing timestamp) contributes nothing, so a subtree of
-    only undated nodes sorts last.
+    A node parents another when ``(row.repo, row.parent_number)`` — its
+    parent's :data:`IssueKey` — exists in the index; everything else is a
+    root. Trees stay repository-local because ``parent_number`` is already
+    ``None`` when the real parent lives in another repo (nulled at
+    row-construction time, see :func:`_parent_number`) — so a cross-repo
+    child can never link under an unrelated same-number issue in its own
+    repo. The repo-qualified key lookup here, combined with the cross-repo
+    guard in :func:`build_index`, is belt-and-braces on top of that.
+
+    Siblings (and roots) are ordered *active-subtree first*: by the minimum
+    age anywhere in the subtree, ascending, ties broken by the full
+    ``(repo, number)`` key. This floats the cluster you are working in now to
+    the top as a whole unit, while stale clusters sink intact. A node with no
+    age (missing timestamp) contributes nothing, so a subtree of only undated
+    nodes sorts last.
     """
-    children: dict[int, list[int]] = {}
-    roots: list[int] = []
-    for number, row in index.items():
-        parent = row.parent_number
-        if parent is not None and parent in index:
-            children.setdefault(parent, []).append(number)
+    children: dict[IssueKey, list[IssueKey]] = {}
+    roots: list[IssueKey] = []
+    for key, row in index.items():
+        parent_key = (
+            (row.repo, row.parent_number) if row.parent_number is not None else None
+        )
+        if parent_key is not None and parent_key in index:
+            children.setdefault(parent_key, []).append(key)
         else:
-            roots.append(number)
+            roots.append(key)
 
     # Sentinel age for nodes/subtrees with no datable activity: sorts them last.
     NO_AGE = 10**9
-    min_age_cache: dict[int, int] = {}
+    min_age_cache: dict[IssueKey, int] = {}
 
-    def subtree_min_age(number: int) -> int:
-        if number in min_age_cache:
-            return min_age_cache[number]
-        row = index[number]
+    def subtree_min_age(key: IssueKey) -> int:
+        if key in min_age_cache:
+            return min_age_cache[key]
+        row = index[key]
         best = row.age_days if row.age_days is not None else NO_AGE
-        for child in children.get(number, []):
+        for child in children.get(key, []):
             best = min(best, subtree_min_age(child))
-        min_age_cache[number] = best
+        min_age_cache[key] = best
         return best
 
-    def ordered(numbers: list[int]) -> list[int]:
-        return sorted(numbers, key=lambda n: (subtree_min_age(n), n))
+    def ordered(keys: list[IssueKey]) -> list[IssueKey]:
+        return sorted(keys, key=lambda k: (subtree_min_age(k), k))
 
-    def make(number: int, depth: int) -> TreeNode:
-        kids = ordered(children.get(number, []))
+    def make(key: IssueKey, depth: int) -> TreeNode:
+        kids = ordered(children.get(key, []))
         return TreeNode(
-            row=index[number],
+            row=index[key],
             depth=depth,
             children=[make(child, depth + 1) for child in kids],
         )
@@ -318,6 +434,36 @@ def flatten(forest: list[TreeNode]) -> list[TreeNode]:
     for node in forest:
         walk(node)
     return out
+
+
+def group_by_repo(index: dict[IssueKey, IssueRow]) -> list[tuple[str, list[TreeNode]]]:
+    """Partition ``index`` by repo, each repo built into its own forest.
+
+    Groundwork for an owner-wide view (issue #43): nothing calls this from the
+    CLI yet. Each repo's slice of the index is handed to :func:`build_forest`
+    unchanged — the cross-repo guard already applied in :func:`build_index`
+    means every tree here is self-contained, so partitioning first and
+    building per-partition is safe and simple.
+
+    Sections are ordered most-recently-active first: ascending by the minimum
+    ``age_days`` across *all* of a repo's rows (mirroring the ``NO_AGE``
+    sentinel :func:`build_forest` uses, so a repo with no datable activity at
+    all sorts last), ties broken alphabetically by repo name.
+    """
+    by_repo: dict[str, dict[IssueKey, IssueRow]] = {}
+    for key, row in index.items():
+        by_repo.setdefault(row.repo, {})[key] = row
+
+    NO_AGE = 10**9
+
+    def repo_min_age(rows: dict[IssueKey, IssueRow]) -> int:
+        ages = [row.age_days for row in rows.values() if row.age_days is not None]
+        return min(ages) if ages else NO_AGE
+
+    ordered_repos = sorted(
+        by_repo, key=lambda name: (repo_min_age(by_repo[name]), name)
+    )
+    return [(name, build_forest(by_repo[name])) for name in ordered_repos]
 
 
 # --- sprint view -------------------------------------------------------------
@@ -415,15 +561,6 @@ def status_rank(status: str | None, status_order: Sequence[str]) -> int:
     return order.index(normalized) if normalized in order else len(status_order)
 
 
-def _item_assignees(content: dict[str, Any]) -> list[str]:
-    nodes = (content.get("assignees") or {}).get("nodes") or []
-    return [
-        node["login"]
-        for node in nodes
-        if isinstance(node, dict) and isinstance(node.get("login"), str)
-    ]
-
-
 def _field_value(item: dict[str, Any], key: str, subkey: str) -> str | None:
     """Read a non-empty string from ``item[key][subkey]`` (a project fieldValue)."""
     value = item.get(key)
@@ -473,7 +610,7 @@ def build_sprint_view(
         repo_name = (content.get("repository") or {}).get("nameWithOwner")
         if repo_name != repo:
             continue
-        assignees = _item_assignees(content)
+        assignees = _assignees(content)
         age = age_in_days(content.get("updatedAt"), now)
         sub_total, sub_completed = _sub_summary(content)
         pr_state, pr_number = dominant_pr(content)

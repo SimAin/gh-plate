@@ -129,7 +129,7 @@ def _run_yours(
         return 0
 
     index = build_index(
-        issues, now=datetime.now(UTC), stale_days=args.stale_days
+        issues, now=datetime.now(UTC), stale_days=args.stale_days, repo=repo
     )
     forest = build_forest(index)
 
