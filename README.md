@@ -44,6 +44,7 @@ issue-check --color never
 issue-check --stale-days 30
 issue-check --show-key
 issue-check --sprint            # the repo's current sprint (see below)
+issue-check --owner my-org      # every open issue across an owner (see below)
 ```
 
 If run outside a git repository without `--repo`, it prints an actionable error.
@@ -153,6 +154,61 @@ This config — with your real org, repo, and project — stays in your local co
 file; it is intentionally **not** committed to the repo (the tool ships agnostic).
 `gh` must have the `read:project` scope (`gh auth refresh -s read:project`).
 
+## Owner-wide view (`--owner`)
+
+Where the default view is *"what's on my plate in this repo?"*, `issue-check
+--owner` is *"what's open across everything this owner has?"* — every open issue
+across all of an organization's or user account's repositories, in one table.
+Rows are **grouped by repository**, with the **most recently active repo first**;
+within each repo the same tree hierarchy applies. Because a personal project's
+issues are often unassigned, this view shows **all** open issues by default and
+renders **unassigned** ones full-weight — open work you could pick up — while
+someone else's issues are dimmed. It needs no checkout, so it runs from anywhere:
+
+```sh
+issue-check --owner my-org         # an organization
+issue-check --owner SimAin         # a personal account
+issue-check --owner work           # a configured alias (see below)
+issue-check --owner my-org --mine  # narrow to issues assigned to you
+issue-check --owner my-org --format markdown
+```
+
+The account type (org vs. user) is detected automatically. `--mine` narrows to
+your own assignments; it is only meaningful with `--owner` (the default view is
+already yours-only).
+
+### Owner aliases (configuration)
+
+Add an `owners` block to your config file (same file as above) to give a short
+alias to an org or username you type often:
+
+```json
+{
+  "owners": {
+    "personal": "SimAin",
+    "work":     "company-org"
+  }
+}
+```
+
+`--owner work` then resolves to `company-org`, and the output shows the mapping
+(`work → company-org`) so it's clear what was queried. Lookup is
+case-insensitive. Any name **not** in the table falls through as a literal, so
+`--owner some-other-org` keeps working with zero config. If an alias happens to
+match a real owner's name, the **alias wins** (shadows the literal) — remove the
+alias to get the literal back.
+
+### Honesty notes
+
+- **Archived repos are excluded** — an archived repo is done, not live work.
+- **GitHub's search API caps any single query at 1000 results.** For a very
+  large owner the tool cannot fetch past that ceiling, so it prints a note
+  (`showing N of M`) rather than silently presenting a partial table. Use
+  `--mine` or `--repo` to narrow.
+- **`--limit` is global** across the whole owner (not per repo). Results are
+  sorted most-recently-active first, so truncating by `--limit` keeps the issues
+  that were touched most recently; a truncation note reports the count.
+
 ## Special labels (configuration)
 
 By default the label set is shown agnostically — except `blocked`, which is
@@ -191,10 +247,10 @@ isolated:
 | Module | Responsibility |
 | --- | --- |
 | `model.py` | Pure domain: raw JSON → `IssueRow` index → sorted forest (`build_index`/`build_forest`); the sprint buckets (`build_sprint_view`); health state, progress. |
-| `github.py` | The only impure module: `git`/`gh` shelling, repo + login detection, the issue + project-board GraphQL fetches (`fetch_assigned_issues`, `fetch_sprint_items`) + pagination. Failures raise `IssueCheckError`. |
-| `config.py` | The JSON config: special-label styles and the per-repo `repos` → project-board mapping. |
-| `render.py` | Pure presentation: ANSI/width primitives, `terminal_tree`/`markdown_tree` and `sprint_table`/`sprint_markdown`. |
-| `cli.py` | Argument parsing and wiring (`--sprint` selects the board view); turns `IssueCheckError` into a clean exit. |
+| `github.py` | The only impure module: `git`/`gh` shelling, repo + login detection, the issue + project-board GraphQL fetches (`fetch_assigned_issues`, `fetch_owner_issues`, `fetch_sprint_items`) + owner-type resolution + pagination. Failures raise `IssueCheckError`. |
+| `config.py` | The JSON config: special-label styles, the per-repo `repos` → project-board mapping, and the `owners` alias table. |
+| `render.py` | Pure presentation: ANSI/width primitives, `terminal_tree`/`markdown_tree`, `sprint_table`/`sprint_markdown`, and `owner_tree`/`owner_markdown`. |
+| `cli.py` | Argument parsing and wiring (`--sprint` selects the board view, `--owner` the owner-wide view); turns `IssueCheckError` into a clean exit. |
 
 ## Design & docs
 
