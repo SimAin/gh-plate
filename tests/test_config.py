@@ -206,3 +206,93 @@ def test_repos_status_order_must_be_list_of_strings(tmp_path) -> None:
     )
     with pytest.raises(IssueCheckError, match='"statusOrder" must be a list'):
         config.load_config(str(path))
+
+
+# --- owner aliases (owners block) ---------------------------------------------
+
+
+def test_owners_block_parses(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"owners": {"work": "my-work-org"}}))
+    cfg = config.load_config(str(path))
+    assert cfg.owners == {"work": "my-work-org"}
+
+
+def test_owners_keys_are_normalized(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"owners": {"  Work  ": "my-work-org"}}))
+    cfg = config.load_config(str(path))
+    assert cfg.owners == {"work": "my-work-org"}
+    assert cfg.resolve_owner("Work") == "my-work-org"
+    assert cfg.resolve_owner("  WORK  ") == "my-work-org"
+
+
+def test_owners_block_must_be_an_object(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"owners": ["work", "my-work-org"]}))
+    with pytest.raises(IssueCheckError, match='"owners" must be an object'):
+        config.load_config(str(path))
+
+
+def test_owners_value_must_be_a_string(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"owners": {"work": 123}}))
+    with pytest.raises(IssueCheckError, match='"owners" must be an object'):
+        config.load_config(str(path))
+
+
+def test_owners_value_must_not_be_empty(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"owners": {"work": "   "}}))
+    with pytest.raises(IssueCheckError, match='"owners" must be an object'):
+        config.load_config(str(path))
+
+
+def test_owners_alias_must_not_be_empty(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"owners": {"   ": "my-work-org"}}))
+    with pytest.raises(IssueCheckError, match='"owners" must be an object'):
+        config.load_config(str(path))
+
+
+def test_resolve_owner_alias_hit(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"owners": {"personal": "my-projects-org"}}))
+    cfg = config.load_config(str(path))
+    assert cfg.resolve_owner("personal") == "my-projects-org"
+
+
+def test_resolve_owner_is_case_insensitive(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"owners": {"work": "my-work-org"}}))
+    cfg = config.load_config(str(path))
+    assert cfg.resolve_owner("WORK") == "my-work-org"
+
+
+def test_resolve_owner_falls_through_to_literal_for_unknown_names(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"owners": {"work": "my-work-org"}}))
+    cfg = config.load_config(str(path))
+    assert cfg.resolve_owner("some-other-org") == "some-other-org"
+
+
+def test_resolve_owner_alias_shadows_literal_of_same_name(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"owners": {"acme": "other-org"}}))
+    cfg = config.load_config(str(path))
+    assert cfg.resolve_owner("acme") == "other-org"
+
+
+def test_resolve_owner_without_owners_block_is_always_literal(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"labels": {"blocked": "alert"}}))
+    cfg = config.load_config(str(path))
+    assert cfg.resolve_owner("anything") == "anything"
+    assert cfg.resolve_owner("Some-Org") == "Some-Org"
+
+
+def test_resolve_owner_default_config_is_always_literal(tmp_path) -> None:
+    missing = tmp_path / "nope.json"
+    cfg = config.load_config(str(missing))
+    assert cfg.owners == {}
+    assert cfg.resolve_owner("anything") == "anything"
