@@ -19,6 +19,10 @@ from .model import (
     PR_DRAFT,
     PR_MERGED,
     PR_OPEN,
+    ROW_CONTEXT,
+    ROW_MINE,
+    ROW_OTHERS,
+    ROW_UNASSIGNED,
     STALE,
     SprintRow,
     SprintView,
@@ -26,6 +30,7 @@ from .model import (
     flatten,
     issue_state,
     progress_text,
+    row_class,
     strip_emoji,
 )
 
@@ -284,13 +289,13 @@ def _tree_cell(node: TreeNode, width: int, use_color: bool) -> str:
     row = node.row
     indent = "  " * node.depth
     num = f"#{row.number}"
-    glyph = STATE_GLYPHS[issue_state(row)][0] if row.mine else CONTEXT_GLYPH
-    pr = _pr_marker(row.pr_state if row.mine else None, use_color)
+    glyph = STATE_GLYPHS[issue_state(row)][0] if not row.context else CONTEXT_GLYPH
+    pr = _pr_marker(row.pr_state if not row.context else None, use_color)
     # head: indent + health glyph + space + pr column (1) + space + num + space
     head = len(indent) + len(glyph) + 1 + 1 + 1 + len(num) + 1
     title = truncate(row.title, max(0, width - head))
 
-    if not row.mine:
+    if row.context:
         # context ancestor: blank health+PR columns keep it aligned with owned rows
         linked = hyperlink(num, row.url, use_color)
         return dim(f"{indent}{glyph}   {linked} {title}", use_color)
@@ -319,7 +324,7 @@ def terminal_tree(
 
     for node in flatten(forest):
         row = node.row
-        if row.mine:
+        if not row.context:
             age_text = format_age(row.age_days)
             age = (
                 colorize(age_text, SOFT_ROSE, use_color)
@@ -347,49 +352,65 @@ def terminal_tree(
 
 # --- markdown tree (nested list — the natural shape for a hierarchy) ---------
 
+def _markdown_row(
+    node: TreeNode,
+    resolver: Callable[[str], str | None] | None,
+    *,
+    assignee_meta: bool,
+) -> str:
+    """One markdown list line for ``node`` — shared by the yours and owner views.
+
+    ``assignee_meta`` (owner view only) prepends ``@login`` to an ``others`` row's
+    meta chain, the "someone else has this" signal that view needs; the yours
+    view passes ``False``, since every non-context row there is yours by
+    construction and ``unassigned`` rows are the default audience anyway.
+    """
+    resolve = resolver or _no_style
+    row = node.row
+    indent = "  " * node.depth
+    link = f"[#{row.number}]({row.url})" if row.url else f"#{row.number}"
+    title = row.title
+
+    if row.context:
+        # un-owned context ancestor, italicised
+        rollup = f" · {progress_text(row)}" if row.has_children else ""
+        return f"{indent}- *{link} {title}{rollup}*"
+
+    glyph = STATE_GLYPHS[issue_state(row)][0]
+    meta = []
+    if assignee_meta and row_class(row) == ROW_OTHERS:
+        meta.append(f"@{row.assignees[0]}")
+    if row.pr_state:
+        pr_glyph = PR_GLYPHS[row.pr_state][0]
+        word = PR_MD_WORDS[row.pr_state]
+        ref = f" #{row.pr_number}" if row.pr_number else ""
+        meta.append(f"{pr_glyph}{ref} {word}")
+    age = format_age(row.age_days)
+    if age:
+        meta.append(age)
+    if row.has_children:
+        meta.append(progress_text(row))
+    if row.labels:
+        # special labels first (bold), ordinary after; "hide" dropped
+        specials = [n for n in row.labels if resolve(n) in LABEL_STYLE_COLORS]
+        ordinary = [n for n in row.labels if resolve(n) is None]
+        shown = [f"**{n}**" for n in specials] + ordinary
+        if shown:
+            meta.append(", ".join(shown))
+    if row.comments_count:
+        meta.append(f"{row.comments_count}c")
+    suffix = (" · " + " · ".join(meta)) if meta else ""
+    return f"{indent}- {glyph} {link} {title}{suffix}"
+
+
 def markdown_tree(
     forest: list[TreeNode],
     resolver: Callable[[str], str | None] | None = None,
 ) -> str:
-    resolve = resolver or _no_style
-    lines: list[str] = []
-    for node in flatten(forest):
-        row = node.row
-        indent = "  " * node.depth
-        link = f"[#{row.number}]({row.url})" if row.url else f"#{row.number}"
-        title = row.title
-
-        if not row.mine:
-            # un-owned context ancestor, italicised
-            rollup = f" · {progress_text(row)}" if row.has_children else ""
-            lines.append(f"{indent}- *{link} {title}{rollup}*")
-            continue
-
-        glyph = STATE_GLYPHS[issue_state(row)][0]
-        meta = []
-        if row.pr_state:
-            pr_glyph = PR_GLYPHS[row.pr_state][0]
-            word = PR_MD_WORDS[row.pr_state]
-            ref = f" #{row.pr_number}" if row.pr_number else ""
-            meta.append(f"{pr_glyph}{ref} {word}")
-        age = format_age(row.age_days)
-        if age:
-            meta.append(age)
-        if row.has_children:
-            meta.append(progress_text(row))
-        if row.labels:
-            # special labels first (bold), ordinary after; "hide" dropped
-            specials = [n for n in row.labels if resolve(n) in LABEL_STYLE_COLORS]
-            ordinary = [n for n in row.labels if resolve(n) is None]
-            shown = [f"**{n}**" for n in specials] + ordinary
-            if shown:
-                meta.append(", ".join(shown))
-        if row.comments_count:
-            meta.append(f"{row.comments_count}c")
-        suffix = (" · " + " · ".join(meta)) if meta else ""
-        lines.append(f"{indent}- {glyph} {link} {title}{suffix}")
-
-    return "\n".join(lines)
+    return "\n".join(
+        _markdown_row(node, resolver, assignee_meta=False)
+        for node in flatten(forest)
+    )
 
 
 # --- sprint view -------------------------------------------------------------
@@ -565,6 +586,174 @@ def sprint_markdown(
     return "\n".join(lines).rstrip()
 
 
+# --- owner-wide view ---------------------------------------------------------
+#
+# The owner view (issue #43) renders open issues across *all* of an owner's repos,
+# one section per repo (most recently active first — see model.group_by_repo).
+# Unlike the yours-view tree, every open issue is shown, so rows carry the four
+# weights of model.row_class: mine/unassigned full-weight with a health glyph
+# (unassigned work in a personal project is still yours to pick up), others dimmed
+# whole (weight-is-attention, as in the sprint view), context structure-only.
+# Columns mirror the sprint view (Assignee returns as signal), minus Status.
+
+def _owner_issue_width(term: int) -> int:
+    fixed = AGE_W + ASSIGNEE_W + SPRINT_LABELS_W + PROG_W + CMT_W
+    separators = 2 * 5  # six columns, five gaps
+    return max(MIN_TREE_WIDTH, min(term - fixed - separators, MAX_TREE_WIDTH))
+
+
+def _owner_columns(issue_w: int) -> list[tuple[str, int, str]]:
+    """The owner table layout — one source for the header and every row.
+
+    ``issue_w`` is computed from the terminal width; the rest are fixed and
+    shared with the sprint view (``ASSIGNEE_W``, ``SPRINT_LABELS_W``). Both the
+    header and :func:`_owner_row_line` consume this so widths stay in lock-step.
+    """
+    return [
+        ("Issue", issue_w, "left"),
+        ("Age", AGE_W, "right"),
+        ("Assignee", ASSIGNEE_W, "left"),
+        ("Labels", SPRINT_LABELS_W, "left"),
+        ("Prog", PROG_W, "right"),
+        ("Cmt", CMT_W, "right"),
+    ]
+
+
+def _owner_tree_cell(node: TreeNode, width: int, use_color: bool) -> str:
+    """``<indent><glyph><pr> <#num> <title>`` for an owner row, sized before colour.
+
+    Classified by :func:`model.row_class`: ``mine``/``unassigned`` lead with a
+    health glyph + PR marker at full weight (like :func:`_tree_cell`);
+    ``others``/``context`` use the neutral ``·`` with blank health+PR columns and
+    are dimmed whole by the caller, so numbers and titles stay aligned either way.
+    """
+    row = node.row
+    indent = "  " * node.depth
+    num = f"#{row.number}"
+    if row_class(row) in (ROW_MINE, ROW_UNASSIGNED):
+        state = issue_state(row)
+        glyph, color = STATE_GLYPHS[state]
+        pr = _pr_marker(row.pr_state, use_color)
+        head = len(indent) + len(glyph) + 1 + 1 + 1 + len(num) + 1
+        title = truncate(row.title, max(0, width - head))
+        linked = hyperlink(dim(num, use_color), row.url, use_color)
+        return f"{indent}{colorize(glyph, color, use_color)} {pr} {linked} {title}"
+    head = len(indent) + len(CONTEXT_GLYPH) + 3 + len(num) + 1
+    title = truncate(row.title, max(0, width - head))
+    linked = hyperlink(num, row.url, use_color)
+    return f"{indent}{CONTEXT_GLYPH}   {linked} {title}"
+
+
+def _owner_row_line(
+    node: TreeNode,
+    columns: list[tuple[str, int, str]],
+    use_color: bool,
+    resolver: Callable[[str], str | None] | None,
+) -> str:
+    """One owner row, laid out against ``columns`` (see :func:`_owner_columns`).
+
+    ``mine``/``unassigned`` colour the Age (rose when stale) and promote special
+    labels; ``mine`` shows your login dim (low signal — it's you), ``unassigned``
+    shows ``—``. ``others`` carry the same data plain (assignee = first login),
+    then dim the whole line. ``context`` shows number+title and its rollup only.
+    """
+    row = node.row
+    cls = row_class(row)
+    issue = _owner_tree_cell(node, columns[0][1], use_color)
+    age_text = format_age(row.age_days)
+    prog = progress_text(row)
+
+    if cls in (ROW_MINE, ROW_UNASSIGNED):
+        age = (
+            colorize(age_text, SOFT_ROSE, use_color)
+            if row.is_stale
+            else dim(age_text, use_color)
+        )
+        # mine: assignee is you — low signal, shown dim; unassigned: nobody, "—".
+        assignee = (
+            dim(row.assignees[0], use_color)
+            if cls == ROW_MINE and row.assignees
+            else "—"
+        )
+        labels = format_labels(row.labels, SPRINT_LABELS_W, use_color, resolver)
+        values = [issue, age, assignee, labels,
+                  dim(prog, use_color), dim(str(row.comments_count), use_color)]
+        return "  ".join(
+            format_cell(v, w, a)
+            for v, (_, w, a) in zip(values, columns, strict=True)
+        )
+
+    if cls == ROW_CONTEXT:
+        # structural ancestor: number+title + rollup only, then dimmed whole.
+        values = [issue, "", "", "", prog, ""]
+        line = "  ".join(
+            format_cell(v, w, a)
+            for v, (_, w, a) in zip(values, columns, strict=True)
+        )
+        return dim(line, use_color)
+
+    # others: same data as a full row, plain, then dimmed whole. The resolver's
+    # "hide" is still honoured; promotion/colour is not, so the row stays dim.
+    resolve = resolver or _no_style
+    assignee = row.assignees[0] if row.assignees else "—"
+    visible_labels = [name for name in row.labels if resolve(name) != "hide"]
+    values = [issue, age_text, assignee,
+              _pack_labels(visible_labels, SPRINT_LABELS_W), prog,
+              str(row.comments_count)]
+    line = "  ".join(
+        format_cell(v, w, a)
+        for v, (_, w, a) in zip(values, columns, strict=True)
+    )
+    return dim(line, use_color)
+
+
+def owner_tree(
+    sections: list[tuple[str, list[TreeNode]]],
+    use_color: bool,
+    resolver: Callable[[str], str | None] | None = None,
+) -> str:
+    """Terminal owner view: one header, then a divider + rows per repo section.
+
+    ``sections`` is ``model.group_by_repo``'s output (``OWNER/REPO`` -> forest),
+    already ordered most-recently-active first; the section order is preserved.
+    Each divider counts the section's non-context (real, open) rows.
+    """
+    columns = _owner_columns(_owner_issue_width(terminal_width()))
+    total = sum(w for _, w, _ in columns) + 2 * (len(columns) - 1)
+    header = "  ".join(format_cell(n, w, a) for n, w, a in columns)
+    lines = [bold(header, use_color)]
+
+    for repo, forest in sections:
+        nodes = flatten(forest)
+        open_count = sum(1 for n in nodes if not n.row.context)
+        lines.append(_divider(f"{repo} · {open_count} open", total, use_color))
+        for node in nodes:
+            lines.append(_owner_row_line(node, columns, use_color, resolver))
+
+    return "\n".join(line.rstrip() for line in lines)
+
+
+def owner_markdown(
+    sections: list[tuple[str, list[TreeNode]]],
+    resolver: Callable[[str], str | None] | None = None,
+) -> str:
+    """Markdown owner view: a ``## OWNER/REPO`` heading + nested list per section.
+
+    Each section reuses :func:`markdown_tree`'s row format (via
+    :func:`_markdown_row`), with ``@login`` added to ``others`` rows so a reader
+    can tell whose issue it is; ``unassigned`` rows get no assignee meta.
+    """
+    blocks: list[str] = []
+    for repo, forest in sections:
+        lines = [f"## {repo}"]
+        lines.extend(
+            _markdown_row(node, resolver, assignee_meta=True)
+            for node in flatten(forest)
+        )
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
 # --- key ---------------------------------------------------------------------
 
 def symbol_key(use_color: bool) -> str:
@@ -622,6 +811,43 @@ def sprint_key(use_color: bool) -> str:
                 "yours rows are full-weight, others/unassigned are dimmed whole · "
                 "Prog = completed/total sub-issues · Age in rose = stale · "
                 "Status has emoji stripped in the terminal (kept in markdown)",
+                use_color,
+            ),
+        ]
+    )
+
+
+def owner_key(use_color: bool) -> str:
+    """The ``--show-key`` text for the owner-wide view — distinct from the others.
+
+    The owner view (issue #43) shows every open issue across an owner's repos,
+    grouped by repository (most recently active first). Both yours *and*
+    unassigned rows render full-weight with a health glyph — unassigned work in a
+    personal project is still yours to pick up — while the neutral ``·`` does
+    double duty: someone else's issue (dimmed whole) or a parent shown only for
+    structure.
+    """
+    states = "   ".join(
+        f"{colorize(STATE_GLYPHS[s][0], STATE_GLYPHS[s][1], use_color)} "
+        f"{STATE_LABELS[s]}"
+        for s in (STALE, ACTIVE)
+    )
+    prs = "   ".join(
+        f"{_pr_marker(s, use_color)} {PR_LABELS[s]}"
+        for s in (PR_OPEN, PR_DRAFT, PR_MERGED, PR_CLOSED)
+    )
+    return "\n".join(
+        [
+            bold("Key", use_color),
+            "  State   " + states
+            + f"   {CONTEXT_GLYPH} someone else's issue (dimmed) / "
+            "parent shown for structure",
+            "  PR      " + prs,
+            dim(
+                "  Rows are grouped by repository, most recently active repo "
+                "first · unassigned issues are full-weight (open work you could "
+                "pick up) · Assignee — = unassigned · "
+                "Prog = completed/total sub-issues · Age in rose = stale",
                 use_color,
             ),
         ]
