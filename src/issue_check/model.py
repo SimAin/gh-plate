@@ -48,6 +48,14 @@ _EMOJI_SHORTCODE_RE = re.compile(r":[a-z0-9_+]+:\s*")
 ACTIVE = "active"
 STALE = "stale"
 
+# Row classes for the owner-wide view (issue #43), where ALL open issues are
+# shown — not just yours — so "mine" and "shown-for-context-only" stop being the
+# same axis. :func:`row_class` resolves a row to exactly one of these.
+ROW_MINE = "mine"              # assigned to you — full weight, health glyph
+ROW_CONTEXT = "context"        # ancestor pulled in only for structure — dimmed
+ROW_UNASSIGNED = "unassigned"  # open, nobody assigned — full weight (yours to grab)
+ROW_OTHERS = "others"          # assigned to someone else — dimmed whole
+
 # Linked-PR ("fix in flight") states, in the priority used to pick which one to
 # surface when an issue links several PRs. Live work outranks a landed or dead
 # attempt: an open fix is the thing you care about, a merged PR on a still-open
@@ -63,9 +71,13 @@ _PR_PRIORITY = [PR_OPEN, PR_DRAFT, PR_MERGED, PR_CLOSED]
 class IssueRow:
     """A single issue node, normalized for rendering. Immutable by design.
 
-    ``mine`` distinguishes an issue assigned to you (full data, health glyph)
-    from an ancestor pulled in only for context (``mine=False``: no labels or
-    comments, rendered dimmed).
+    ``context`` marks an ancestor materialised only for structure by
+    :func:`build_index`'s ancestor walk (no labels/comments/PR/assignee data,
+    rendered dimmed). ``mine`` marks an issue assigned to you. In the yours view
+    these are exact opposites (every fetched row is yours, every ancestor is
+    not), but the owner-wide view (issue #43) shows all open issues, so a fetched
+    row can be ``mine=False, context=False`` (someone else's, or unassigned) —
+    the two flags are set independently. See :func:`row_class`.
 
     ``repo`` (``OWNER/REPO``) is what makes ``(repo, number)`` — see
     :data:`IssueKey` — a safe index key across repos; ``number`` alone is not.
@@ -87,6 +99,7 @@ class IssueRow:
     sub_total: int
     sub_completed: int
     mine: bool
+    context: bool = False
     assignees: list[str] = field(default_factory=list)
     pr_state: str | None = None   # dominant linked-PR state, or None if unlinked
     pr_number: int | None = None  # the PR backing pr_state (for markdown / links)
@@ -266,22 +279,30 @@ def _row_from_issue(
     now: datetime | None,
     stale_days: int,
     *,
+    context: bool,
     mine: bool,
     default_repo: str,
 ) -> IssueRow:
+    """Normalize one issue payload into an :class:`IssueRow`.
+
+    ``context`` and ``mine`` are set independently by the caller (they are exact
+    opposites only in the yours view): the ancestor-walk path passes
+    ``context=True, mine=False``, the fetched path ``context=False`` with ``mine``
+    computed by :func:`build_index`. Structure-only context rows carry no
+    labels/comments/PR/assignee data — none of it is fetched for them, and none
+    is the signal a dimmed context node is meant to show.
+    """
     repo = _repo_of(issue, default_repo)
     age = age_in_days(issue.get("updatedAt"), now)
     sub_total, sub_completed = _sub_summary(issue)
-    # Context ancestors carry no PR marker — they aren't fetched with PR refs
-    # and the marker is a "what's being worked on *my* issue" signal.
-    pr_state, pr_number = dominant_pr(issue) if mine else (None, None)
+    pr_state, pr_number = (None, None) if context else dominant_pr(issue)
     return IssueRow(
         repo=repo,
         number=int(issue.get("number", 0)),
         url=str(issue.get("url") or ""),
         title=compact_text(issue.get("title")),
-        labels=_labels(issue) if mine else [],
-        comments_count=_comments_count(issue) if mine else 0,
+        labels=[] if context else _labels(issue),
+        comments_count=0 if context else _comments_count(issue),
         age_days=age,
         is_stale=age is not None and age >= stale_days,
         # None for a cross-repo parent (see _parent_number) — the row must not
@@ -291,10 +312,8 @@ def _row_from_issue(
         sub_total=sub_total,
         sub_completed=sub_completed,
         mine=mine,
-        # Context ancestors carry no assignee data either — same rationale as
-        # labels/comments above (not fetched for them, and not the signal a
-        # dimmed context node is meant to show).
-        assignees=_assignees(issue) if mine else [],
+        context=context,
+        assignees=[] if context else _assignees(issue),
         pr_state=pr_state,
         pr_number=pr_number,
     )
@@ -306,15 +325,25 @@ def build_index(
     stale_days: int,
     *,
     repo: str,
+    login: str | None = None,
 ) -> dict[IssueKey, IssueRow]:
     """Map :data:`IssueKey` (``repo``, ``number``) -> :class:`IssueRow`.
 
-    Owned issues (assigned to you) come first and win, keyed by their own
-    ``(row.repo, row.number)`` — ``repo`` is the repo that was queried, used as
-    the fallback when an issue's payload carries no ``repository`` field of its
-    own (true of the yours-view query today, see :func:`_repo_of`). Each
-    issue's ancestor chain then fills in any parent not already present, as an
-    un-owned context node, so the forest can always be rooted.
+    Fetched issues come first and win, keyed by their own ``(row.repo,
+    row.number)`` — ``repo`` is the repo that was queried, used as the fallback
+    when an issue's payload carries no ``repository`` field of its own (true of
+    the yours-view query today, see :func:`_repo_of`). Each issue's ancestor
+    chain then fills in any parent not already present, as an un-owned context
+    node, so the forest can always be rooted.
+
+    ``login`` selects how ``mine`` is computed for the fetched rows:
+
+    - ``None`` (the yours view): every fetched issue is ``mine=True`` — the
+      search query already filtered to your assignments, and the
+      ``assignees(first: 10)`` clipping means membership testing here would be
+      less reliable than the query's own guarantee.
+    - given (the owner view): a fetched issue is ``mine = login in assignees``,
+      since the owner view fetches everyone's issues and must tell yours apart.
 
     **Cross-repo guard:** GitHub allows a sub-issue's parent to live in a
     different repo, but this tool's hierarchy is repository-local by design —
@@ -333,7 +362,10 @@ def build_index(
     index: dict[IssueKey, IssueRow] = {}
     owned: list[tuple[dict[str, Any], IssueRow]] = []
     for issue in issues:
-        row = _row_from_issue(issue, now, stale_days, mine=True, default_repo=repo)
+        mine = True if login is None else login in _assignees(issue)
+        row = _row_from_issue(
+            issue, now, stale_days, context=False, mine=mine, default_repo=repo
+        )
         index[(row.repo, row.number)] = row
         owned.append((issue, row))
     for issue, owned_row in owned:
@@ -345,7 +377,8 @@ def build_index(
             key = (ancestor_repo, int(ancestor["number"]))
             if key not in index:
                 index[key] = _row_from_issue(
-                    ancestor, now, stale_days, mine=False, default_repo=owned_repo
+                    ancestor, now, stale_days,
+                    context=True, mine=False, default_repo=owned_repo,
                 )
     return index
 
@@ -357,6 +390,33 @@ def issue_state(row: IssueRow) -> str:
     resolver gains ``untriaged`` / ``backlog`` when other groups are built.
     """
     return STALE if row.is_stale else ACTIVE
+
+
+def row_class(row: IssueRow) -> str:
+    """Classify ``row`` for the owner-wide view's four rendering weights.
+
+    The owner view (issue #43) shows every open issue across an owner's repos,
+    not just yours, so a single "mine vs. not" split no longer captures how a row
+    should read. Four classes, each with its own weight:
+
+    - ``mine`` / ``unassigned`` render full-weight with a health glyph. Yours is
+      obvious; unassigned is deliberate — in a personal project, unassigned work
+      is still yours to pick up, so it earns the same attention as your own.
+    - ``others`` (assigned to someone else) is dimmed whole — the sprint view's
+      weight-is-attention precedent: it's on screen for awareness, not action.
+    - ``context`` is a structure-only ancestor (see :func:`build_index`), carrying
+      no data of its own; it exists so a child never floats parentless.
+
+    Checked context-first: a ``context`` ancestor is never ``mine`` and has no
+    assignees, so its class must win before the assignment-based arms.
+    """
+    if row.context:
+        return ROW_CONTEXT
+    if row.mine:
+        return ROW_MINE
+    if not row.assignees:
+        return ROW_UNASSIGNED
+    return ROW_OTHERS
 
 
 def progress_text(row: IssueRow) -> str:

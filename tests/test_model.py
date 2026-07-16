@@ -63,9 +63,14 @@ def k(number: int, repo: str = REPO) -> model.IssueKey:
 
 
 def index(
-    issues: list[dict[str, Any]], stale_days: int = 14, repo: str = REPO
+    issues: list[dict[str, Any]],
+    stale_days: int = 14,
+    repo: str = REPO,
+    login: str | None = None,
 ) -> dict[model.IssueKey, model.IssueRow]:
-    return model.build_index(issues, now=NOW, stale_days=stale_days, repo=repo)
+    return model.build_index(
+        issues, now=NOW, stale_days=stale_days, repo=repo, login=login
+    )
 
 
 # --- normalization -----------------------------------------------------------
@@ -251,6 +256,50 @@ def test_assignees_parsed_from_payload() -> None:
 def test_assignees_default_to_empty_when_absent() -> None:
     idx = index([make_issue(1)])  # no "assignees" key at all
     assert idx[k(1)].assignees == []
+
+
+# --- owner-view classification (mine / context set independently) ------------
+
+
+def test_ancestors_are_context_rows_and_fetched_are_not() -> None:
+    epic = make_issue(10, title="Epic")
+    idx = index([make_issue(11, parent=epic)])
+    assert idx[k(10)].context is True and idx[k(10)].mine is False
+    assert idx[k(11)].context is False and idx[k(11)].mine is True
+
+
+def test_build_index_login_none_marks_all_fetched_mine() -> None:
+    # The yours-view query already filtered to my assignments, so a fetched row
+    # is mine even if the (clipped) assignees list doesn't happen to contain me.
+    idx = index([make_issue(1, assignees=["someone-else"])])  # login defaults None
+    assert idx[k(1)].mine is True
+
+
+def test_build_index_login_computes_mine_from_assignees() -> None:
+    idx = index(
+        [make_issue(1, assignees=["me"]), make_issue(2, assignees=["other"])],
+        login="me",
+    )
+    assert idx[k(1)].mine is True
+    assert idx[k(2)].mine is False
+    assert idx[k(2)].assignees == ["other"]  # fetched rows keep their assignees
+
+
+def test_row_class_resolves_all_four_classes() -> None:
+    epic = make_issue(10, title="Epic")
+    idx = index(
+        [
+            make_issue(1, assignees=["me"]),
+            make_issue(2, assignees=["other"]),
+            make_issue(3, assignees=[]),
+            make_issue(11, parent=epic, assignees=["me"]),
+        ],
+        login="me",
+    )
+    assert model.row_class(idx[k(1)]) == model.ROW_MINE
+    assert model.row_class(idx[k(2)]) == model.ROW_OTHERS
+    assert model.row_class(idx[k(3)]) == model.ROW_UNASSIGNED
+    assert model.row_class(idx[k(10)]) == model.ROW_CONTEXT  # materialized ancestor
 
 
 def test_cross_repo_guard_stops_walk_even_if_grandparent_would_match() -> None:

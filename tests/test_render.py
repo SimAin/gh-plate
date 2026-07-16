@@ -11,6 +11,7 @@ def make_row(
     *,
     repo: str = "an-org/a-repo",
     mine: bool = True,
+    context: bool | None = None,
     title: str = "Title",
     age_days: int = 30,
     is_stale: bool = True,
@@ -19,9 +20,14 @@ def make_row(
     parent_number: int | None = None,
     sub_total: int = 0,
     sub_completed: int = 0,
+    assignees: list[str] | None = None,
     pr_state: str | None = None,
     pr_number: int | None = None,
 ) -> IssueRow:
+    # In the yours view context is exactly "not mine"; owner-view tests that need
+    # the two set independently (an un-owned, non-context row) pass context.
+    if context is None:
+        context = not mine
     return IssueRow(
         repo=repo,
         number=number,
@@ -35,6 +41,8 @@ def make_row(
         sub_total=sub_total,
         sub_completed=sub_completed,
         mine=mine,
+        context=context,
+        assignees=assignees or [],
         pr_state=pr_state,
         pr_number=pr_number,
     )
@@ -411,3 +419,94 @@ def test_sprint_key_names_bucket_order_and_others_glyph() -> None:
 def test_sprint_key_plain_when_color_off() -> None:
     out = render.sprint_key(use_color=False)
     assert "\033[" not in out
+
+
+# --- owner-wide view ---------------------------------------------------------
+
+
+def owner_sections() -> list[tuple[str, list[TreeNode]]]:
+    # repo-x: a context epic over a mine row, an others row, and an unassigned
+    # row; repo-y: a single standalone mine row.
+    mine = TreeNode(
+        make_row(11, title="Mine task", mine=True, context=False,
+                 assignees=["me"], age_days=40, is_stale=True), depth=1
+    )
+    others = TreeNode(
+        make_row(12, title="Theirs", mine=False, context=False,
+                 assignees=["alice"], age_days=5, is_stale=False), depth=1
+    )
+    free = TreeNode(
+        make_row(13, title="Free task", mine=False, context=False,
+                 assignees=[], age_days=3, is_stale=False), depth=1
+    )
+    epic = TreeNode(
+        make_row(10, title="Epic", mine=False, context=True,
+                 sub_total=4, sub_completed=1),
+        depth=0, children=[mine, others, free],
+    )
+    standalone = TreeNode(
+        make_row(20, repo="an-org/repo-y", title="Solo", mine=True,
+                 assignees=["me"], age_days=2, is_stale=False), depth=0
+    )
+    return [("an-org/repo-x", [epic]), ("an-org/repo-y", [standalone])]
+
+
+def test_owner_tree_sections_in_order_with_open_counts() -> None:
+    out = render.owner_tree(owner_sections(), use_color=False)
+    assert out.index("an-org/repo-x") < out.index("an-org/repo-y")  # order kept
+    # divider carries repo name + count of non-context (real, open) rows
+    assert "── an-org/repo-x · 3 open" in out
+    assert "── an-org/repo-y · 1 open" in out
+
+
+def test_owner_tree_row_weights_by_class() -> None:
+    lines = render.owner_tree(owner_sections(), use_color=False).splitlines()
+    mine_line = next(line for line in lines if "#11" in line)
+    others_line = next(line for line in lines if "#12" in line)
+    free_line = next(line for line in lines if "#13" in line)
+    epic_line = next(line for line in lines if "#10" in line)
+    assert "•" in mine_line                       # mine, stale -> health glyph
+    assert "alice" in others_line                 # others -> assignee shown
+    assert "✓" in free_line and "—" in free_line  # unassigned: glyph + em dash
+    # context ancestor: neutral glyph, rollup, no health glyph / assignee
+    assert render.CONTEXT_GLYPH + "   #10" in epic_line
+    assert "1/4" in epic_line
+
+
+def test_owner_tree_others_row_dimmed_whole() -> None:
+    out = render.owner_tree(owner_sections(), use_color=True)
+    others_line = next(line for line in out.splitlines() if "#12" in line)
+    assert others_line.startswith(render.DIM)          # whole line dimmed
+    assert "alice" in render.visible_text(others_line)
+
+
+def test_owner_tree_indents_children_under_section() -> None:
+    lines = render.owner_tree(owner_sections(), use_color=False).splitlines()
+    epic_line = next(line for line in lines if "#10" in line)
+    child_line = next(line for line in lines if "#11" in line)
+    assert child_line.index("#11") > epic_line.index("#10")
+
+
+def test_owner_markdown_headings_nesting_and_assignee_meta() -> None:
+    out = render.owner_markdown(owner_sections())
+    lines = out.splitlines()
+    assert "## an-org/repo-x" in out and "## an-org/repo-y" in out
+    # nested: the mine child is indented under the epic
+    assert any(line.startswith("  - ") and "#11" in line for line in lines)
+    # @login only on the others row — not mine, not unassigned
+    others_line = next(line for line in lines if "#12" in line)
+    mine_line = next(line for line in lines if "#11" in line)
+    free_line = next(line for line in lines if "#13" in line)
+    assert "@alice" in others_line
+    assert "@" not in mine_line and "@" not in free_line
+
+
+def test_owner_key_mentions_dual_glyph_meaning() -> None:
+    out = render.owner_key(use_color=False)
+    assert "Key" in out
+    assert "someone else's issue" in out and "structure" in out
+    assert "grouped by repository" in out
+
+
+def test_owner_key_plain_when_color_off() -> None:
+    assert "\033[" not in render.owner_key(use_color=False)
