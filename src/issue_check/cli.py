@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 
 from . import __version__, config, github, render
 from .github import IssueCheckError
-from .model import build_forest, build_index, build_sprint_view
+from .model import build_forest, build_index, build_sprint_view, group_by_repo
 
 DEFAULT_LIMIT = 500
 DEFAULT_STALE_DAYS = 14
@@ -32,16 +32,28 @@ def _positive_int(value: str) -> int:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="issue-check",
-        description="Status table for open GitHub issues assigned to you.",
+        description="Status table for open GitHub issues assigned to you, or "
+        "across every repository of an owner with --owner.",
     )
     parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
     )
-    parser.add_argument(
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument(
         "--repo",
         help="GitHub repository as OWNER/REPO. Defaults to the current git repo.",
+    )
+    scope.add_argument(
+        "--owner",
+        help="Show open issues across every repository of a GitHub organization "
+        "or user account. Accepts a configured alias (see README).",
+    )
+    parser.add_argument(
+        "--mine",
+        action="store_true",
+        help="With --owner, narrow to issues assigned to you.",
     )
     parser.add_argument(
         "--limit",
@@ -105,8 +117,18 @@ def run(args: argparse.Namespace) -> int:
         print(args.config or config.config_path())
         return 0
 
+    if args.mine and not args.owner:
+        raise IssueCheckError(
+            "--mine only applies with --owner. The default view already shows "
+            "only your assigned issues, so --mine on its own would do nothing."
+        )
+    if args.sprint and args.owner:
+        raise IssueCheckError(
+            "--sprint is per-repo and cannot be combined with --owner. Run "
+            "--sprint on the current repo (or with --repo OWNER/REPO)."
+        )
+
     cfg = config.load_config(args.config)
-    repo = args.repo or github.current_repo()
 
     login = github.current_login()
     if login is None:
@@ -115,6 +137,12 @@ def run(args: argparse.Namespace) -> int:
             "issue-check groups by assignee and cannot run without it."
         )
 
+    if args.owner:
+        # The owner view is not tied to a checkout, so it must not require a git
+        # repo — never call github.current_repo() on this path (#43).
+        return _run_owner(args, cfg, login)
+
+    repo = args.repo or github.current_repo()
     if args.sprint:
         return _run_sprint(args, cfg, repo, login)
     return _run_yours(args, cfg, repo, login)
@@ -147,6 +175,81 @@ def _run_yours(
             f"\nNote: showing {args.limit} of {total} assigned issues.",
             file=sys.stderr,
         )
+    return 0
+
+
+def _run_owner(args: argparse.Namespace, cfg: config.Config, login: str) -> int:
+    resolved = cfg.resolve_owner(args.owner)
+    # Show the alias mapping only when one actually fired (the resolver folds
+    # case, so compare after resolution); a literal owner shows just its name.
+    alias_fired = resolved != args.owner
+    display = f"{args.owner} → {resolved}" if alias_fired else args.owner
+
+    try:
+        owner_type = github.resolve_owner_type(resolved)
+    except IssueCheckError as exc:
+        # An unknown alias falls through resolve_owner as a literal, so a typo'd
+        # alias surfaces here as an unknown owner. If aliases are configured,
+        # list them so the user can spot the one they meant.
+        if cfg.owners:
+            aliases = ", ".join(
+                f"{alias} → {owner}" for alias, owner in cfg.owners.items()
+            )
+            raise IssueCheckError(
+                f"{exc}\nConfigured aliases: {aliases}"
+            ) from exc
+        raise
+
+    issues, total = github.fetch_owner_issues(
+        resolved, owner_type, login, args.limit, mine=args.mine
+    )
+    if not issues:
+        if args.mine:
+            print(f"No open issues assigned to you for {display}.")
+        else:
+            print(f"No open issues found for {display}.")
+        return 0
+
+    # repo=resolved is only the fallback for a payload missing
+    # repository.nameWithOwner; the owner query always carries it, so this is
+    # inert here — it just keeps build_index's contract satisfied.
+    index = build_index(
+        issues,
+        now=datetime.now(UTC),
+        stale_days=args.stale_days,
+        repo=resolved,
+        login=login,
+    )
+    sections = group_by_repo(index)
+
+    if args.format == "markdown":
+        if alias_fired:
+            print(f"*{display}*")
+            print()
+        print(render.owner_markdown(sections, cfg.style_for))
+    else:
+        use_color = _use_color(args)
+        if args.show_key:
+            print(render.owner_key(use_color))
+            print()
+        if alias_fired:
+            print(render.dim(display, use_color))
+        print(render.owner_tree(sections, use_color, cfg.style_for))
+
+    if len(issues) < total:
+        if len(issues) == args.limit:
+            print(
+                f"\nNote: showing {len(issues)} of {total} open issues for "
+                f"{display} (--limit {args.limit}).",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "\nNote: GitHub search returns at most 1000 results per query; "
+                f"showing {len(issues)} of {total} open issues for {display}. "
+                "Use --mine or --repo to narrow.",
+                file=sys.stderr,
+            )
     return 0
 
 

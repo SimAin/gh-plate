@@ -120,6 +120,53 @@ See `SPRINT.md` for the built slice.
 
 ---
 
+## D7 — Owner-wide view (`--owner`): one owner-scoped search, repo sections, repository-local hierarchy
+
+**Decision:** A third view, `issue-check --owner NAME`, renders every open issue
+across all of an owner's repositories in one table, grouped into per-repository
+sections (most recently active repo first), each section a normal issue tree. The
+flag is `--owner`, not the issue's original `--org`: a personal account owns repos
+too, and the view must cover both. The account type (organization vs. user) is
+resolved by one `gh api users/NAME` call, which doubles as up-front validation.
+The view shows **all** open issues by default, with `--mine` as opt-in to narrow to
+your assignments; `--owner` needs no checkout and never calls `current_repo`.
+
+**Why:** "What's open across everything this owner has?" is a distinct question
+from the default per-repo "what's on my plate?" and the per-repo `--sprint` team
+view. Generalizing the issue's `--org` sketch to `--owner` costs nothing and covers
+personal accounts, which own repos just like orgs do; resolving the account type is
+required anyway to pick the right search qualifier, so folding validation into that
+same call is free. Defaulting to *all* open issues (not just mine) is deliberate:
+personal-project issues are frequently unassigned, and an owner-wide view that hid
+them would misrepresent the backlog — so unassigned rows render full-weight (open
+work you could pick up) while others' rows are dimmed.
+
+**Why one owner-scoped search:** rather than enumerate the owner's repos and query
+each, the view issues a single owner-scoped GraphQL Issues search (`org:` / `user:`
++ `archived:false sort:updated-desc`), reusing the yours-view query shape. This is
+D4/D6's "let the API do the work" again — zero per-repo requests. Archived repos are
+excluded by design (done, not live work). GitHub's search API caps any query at 1000
+results, so `total` can exceed what pagination retrieves; the CLI compares
+`len(issues) < total` and prints a note ("showing N of M") whichever ceiling —
+`--limit` or the 1000-result cap — did the truncating, so a partial result is
+**never** silent (#43 acceptance criterion). `sort:updated-desc` means truncation
+drops the *least* recently active issues, keeping the view active-first (D1, D6).
+
+**Consequence:** Identity is repo-qualified `(repo, number)`, and hierarchy is
+repository-local: a cross-repo parent is not materialised — its child renders as a
+root in its own repo's section rather than nesting under a tree from elsewhere.
+Rows are classified by assignment — yours (your login among the assignees),
+someone else's (dimmed whole), unassigned (kept full-weight) — while `context`
+(a structural ancestor) becomes its own axis rather than the inverse of `mine`. Config gains an `owners` alias table (alias →
+owner name, case-insensitive, literal fallthrough, alias-shadows-literal); an alias
+that fired is shown in the output (`work → company-org`). Built on four groundwork
+PRs kept small and independently reviewable: repo-qualified model identity +
+`group_by_repo` (#44), the owner-scoped search + `resolve_owner_type` (#45), the
+`owners` config block + `resolve_owner` (#46), and the owner renderers (#47); this
+view is the CLI wiring that ties them together.
+
+---
+
 ## Standing decisions carried from the architecture discussion
 
 - **Standalone, not a shared package.** The GraphQL fetch layer is specific enough
