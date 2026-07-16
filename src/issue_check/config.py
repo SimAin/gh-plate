@@ -97,6 +97,13 @@ def parse_project_url(value: str) -> tuple[str, str, int]:
 class Config:
     label_styles: dict[str, str] = field(default_factory=dict)
     projects: dict[str, ProjectConfig] = field(default_factory=dict)
+    # Issue #43 originally sketched this block as "organizations", but the
+    # flag it feeds was generalized to `--owner` (it must also cover repos
+    # owned directly by a personal account, not just orgs), so the config
+    # block — and this field — is named "owners". Keys are aliases, stored
+    # stripped + lowercased for case-insensitive lookup; values are the owner
+    # name (an org or username) exactly as the user wrote it.
+    owners: dict[str, str] = field(default_factory=dict)
 
     def style_for(self, label: str) -> str | None:
         """The style for ``label``: case-insensitive, with ``*`` glob support."""
@@ -115,6 +122,24 @@ class Config:
         insensitively, and the casing of a git remote is arbitrary.
         """
         return self.projects.get(str(repo).strip().lower())
+
+    def resolve_owner(self, name: str) -> str:
+        """Resolve ``name`` through the ``owners`` alias table.
+
+        Lookup is case-insensitive (``name`` is stripped + lowercased, the
+        same normalization the alias keys get on load). On a hit, the mapped
+        owner name is returned; on a miss, ``name`` is returned unchanged, so
+        an unconfigured literal org or username keeps working with zero
+        config.
+
+        Collision rule: if an alias happens to equal a real owner's name,
+        the alias wins and shadows the literal. This is deliberate and
+        deterministic — the user explicitly configured that word to mean
+        something else, so honour it; if that's not wanted, remove the
+        alias to get the literal back.
+        """
+        key = name.strip().lower()
+        return self.owners.get(key, name)
 
 
 def config_path() -> str:
@@ -185,14 +210,33 @@ def parse_config(data: Any) -> Config:
     for repo, settings in repos.items():
         projects[str(repo).strip().lower()] = _parse_repo_settings(repo, settings)
 
-    return Config(label_styles=styles, projects=projects)
+    owners: dict[str, str] = {}
+    raw_owners = data.get("owners", {})
+    if not isinstance(raw_owners, dict):
+        raise IssueCheckError(
+            'Config "owners" must be an object of alias -> owner name.'
+        )
+    for alias, owner in raw_owners.items():
+        if not isinstance(alias, str) or not alias.strip():
+            raise IssueCheckError(
+                'Config "owners" must be an object of alias -> owner name '
+                f"(got a blank alias for {owner!r})."
+            )
+        if not isinstance(owner, str) or not owner.strip():
+            raise IssueCheckError(
+                'Config "owners" must be an object of alias -> owner name '
+                f"(alias {alias!r} needs a non-empty owner name)."
+            )
+        owners[alias.strip().lower()] = owner
+
+    return Config(label_styles=styles, projects=projects, owners=owners)
 
 
 def load_config(path: str | None = None) -> Config:
     """Load config from ``path`` (or the default location), or defaults if absent."""
     target = path or config_path()
     if not os.path.exists(target):
-        return Config(label_styles=dict(DEFAULT_LABEL_STYLES))
+        return Config(label_styles=dict(DEFAULT_LABEL_STYLES), owners={})
     try:
         with open(target, encoding="utf-8") as handle:
             data = json.load(handle)
