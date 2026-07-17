@@ -1,4 +1,4 @@
-"""issue-check — a status table for the open GitHub issues assigned to you.
+"""plate — a status table for GitHub work.
 
 Thin wiring layer: parse args, ask :mod:`issue_check.github` for data, hand it
 to :mod:`issue_check.model` to normalize and :mod:`issue_check.render` to format.
@@ -29,17 +29,15 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        prog="issue-check",
-        description="Status table for open GitHub issues assigned to you, or "
-        "across every repository of an owner with --owner.",
-    )
+def _add_version(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
     )
+
+
+def _add_issues_flags(parser: argparse.ArgumentParser) -> None:
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument(
         "--repo",
@@ -103,7 +101,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Print the resolved config file location and exit.",
     )
-    return parser.parse_args(argv)
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="plate",
+        description="Status table for what's on your plate — open GitHub work. "
+        "Run `plate issues` for the issues you're assigned, or across every "
+        "repository of an owner with --owner.",
+    )
+    _add_version(parser)
+    subparsers = parser.add_subparsers(dest="command")
+    issues = subparsers.add_parser(
+        "issues",
+        help="Status table for open GitHub issues assigned to you, or "
+        "across every repository of an owner with --owner.",
+        description="Status table for open GitHub issues assigned to you, or "
+        "across every repository of an owner with --owner.",
+    )
+    _add_issues_flags(issues)
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return _build_parser().parse_args(argv)
 
 
 def _use_color(args: argparse.Namespace) -> bool:
@@ -310,8 +331,15 @@ def _run_sprint(
 
 
 def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.command is None:
+        # Bare `plate`: show the top-level help and point at the issues view.
+        parser.print_help()
+        print("\nHint: run `plate issues` to see the issues assigned to you.")
+        return 0
     try:
-        return run(parse_args(argv))
+        return run(args)
     except IssueCheckError as exc:
         print(str(exc), file=sys.stderr)
         return 1
