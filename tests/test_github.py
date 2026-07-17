@@ -1,10 +1,13 @@
-"""Tests for issue_check.github.
+"""Tests for plate.core.gh (shared git/gh plumbing) and plate.issues.github
+(issue-domain GraphQL fetches).
 
 Most of this module is pure URL/query building and is exercised directly —
 those tests never shell out. The handful that reach an I/O boundary function
 (``_search_issues``, ``fetch_owner_issues``, ``resolve_owner_type``) monkeypatch
-``github._run``, the module's single subprocess chokepoint, with a fake that
-returns canned ``CompletedProcess``-shaped results.
+``gh.run_command``, the shared subprocess chokepoint in :mod:`plate.core.gh` —
+which every domain fetch (in :mod:`plate.issues.github` and, later, a
+``plate.prs.github``) calls through the same ``gh`` module reference, so this
+one patch target intercepts all of them.
 """
 
 from __future__ import annotations
@@ -15,7 +18,8 @@ from typing import Any
 
 import pytest
 
-from issue_check import github
+from plate.core import gh
+from plate.issues import github
 
 
 @pytest.mark.parametrize(
@@ -31,12 +35,12 @@ from issue_check import github
     ],
 )
 def test_repo_from_remote_parses_github_urls(remote: str) -> None:
-    assert github.repo_from_remote(remote) == "an-org/a-repo"
+    assert gh.repo_from_remote(remote) == "an-org/a-repo"
 
 
 def test_run_missing_binary_raises_issue_check_error() -> None:
-    with pytest.raises(github.IssueCheckError, match="no-such-binary-xyz"):
-        github._run(["no-such-binary-xyz", "--version"])
+    with pytest.raises(gh.PlateError, match="no-such-binary-xyz"):
+        gh.run_command(["no-such-binary-xyz", "--version"])
 
 
 def test_sprint_filter_defaults_to_iteration() -> None:
@@ -113,7 +117,7 @@ def test_validate_board_fields_accepts_matching_config() -> None:
 
 
 def test_validate_board_fields_rejects_missing_sprint_field() -> None:
-    with pytest.raises(github.IssueCheckError) as excinfo:
+    with pytest.raises(gh.PlateError) as excinfo:
         github.validate_board_fields(_fields(), "Cycle", "Status")
     message = str(excinfo.value)
     assert "sprintField" in message and '"Cycle"' in message
@@ -122,7 +126,7 @@ def test_validate_board_fields_rejects_missing_sprint_field() -> None:
 
 
 def test_validate_board_fields_rejects_wrong_type_sprint_field() -> None:
-    with pytest.raises(github.IssueCheckError) as excinfo:
+    with pytest.raises(gh.PlateError) as excinfo:
         github.validate_board_fields(_fields(), "Status", "Status")
     message = str(excinfo.value)
     assert "sprintField" in message and '"Status"' in message
@@ -131,7 +135,7 @@ def test_validate_board_fields_rejects_wrong_type_sprint_field() -> None:
 
 
 def test_validate_board_fields_rejects_missing_status_field() -> None:
-    with pytest.raises(github.IssueCheckError) as excinfo:
+    with pytest.raises(gh.PlateError) as excinfo:
         github.validate_board_fields(_fields(), "Sprint", "Column")
     message = str(excinfo.value)
     assert "statusField" in message and '"Column"' in message
@@ -139,7 +143,7 @@ def test_validate_board_fields_rejects_missing_status_field() -> None:
 
 
 def test_validate_board_fields_rejects_wrong_type_status_field() -> None:
-    with pytest.raises(github.IssueCheckError) as excinfo:
+    with pytest.raises(gh.PlateError) as excinfo:
         github.validate_board_fields(_fields(), "Sprint", "Estimate")
     message = str(excinfo.value)
     assert "statusField" in message and "NUMBER" in message
@@ -152,7 +156,7 @@ def test_validate_board_fields_rejects_multiword_sprint_field() -> None:
         {"name": "Sprint Cycle", "dataType": "ITERATION"},
         {"name": "Status", "dataType": "SINGLE_SELECT"},
     ]
-    with pytest.raises(github.IssueCheckError) as excinfo:
+    with pytest.raises(gh.PlateError) as excinfo:
         github.validate_board_fields(fields, "Sprint Cycle", "Status")
     message = str(excinfo.value)
     assert "single-word" in message
@@ -181,7 +185,7 @@ def test_validate_board_fields_ignores_status_order_when_not_given() -> None:
 
 
 def test_validate_board_fields_rejects_unknown_status_order_entry() -> None:
-    with pytest.raises(github.IssueCheckError) as excinfo:
+    with pytest.raises(gh.PlateError) as excinfo:
         github.validate_board_fields(
             _fields_with_status_options(),
             "Sprint",
@@ -254,14 +258,14 @@ def test_resolve_owner_type_maps_organization(monkeypatch: pytest.MonkeyPatch) -
         captured["args"] = args
         return subprocess.CompletedProcess(args, 0, stdout="Organization\n", stderr="")
 
-    monkeypatch.setattr(github, "_run", fake_run)
-    assert github.resolve_owner_type("acme") == "organization"
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    assert gh.resolve_owner_type("acme") == "organization"
     assert captured["args"] == ["gh", "api", "users/acme", "--jq", ".type"]
 
 
 def test_resolve_owner_type_maps_user(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(github, "_run", _fake_run_with_stdout("User\n"))
-    assert github.resolve_owner_type("octocat") == "user"
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout("User\n"))
+    assert gh.resolve_owner_type("octocat") == "user"
 
 
 def test_resolve_owner_type_gh_failure_raises_with_owner_name(
@@ -272,17 +276,17 @@ def test_resolve_owner_type_gh_failure_raises_with_owner_name(
             args, 1, stdout="", stderr="HTTP 404: Not Found"
         )
 
-    monkeypatch.setattr(github, "_run", fake_run)
-    with pytest.raises(github.IssueCheckError, match="no-such-owner"):
-        github.resolve_owner_type("no-such-owner")
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    with pytest.raises(gh.PlateError, match="no-such-owner"):
+        gh.resolve_owner_type("no-such-owner")
 
 
 def test_resolve_owner_type_unexpected_type_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(github, "_run", _fake_run_with_stdout("Bot\n"))
-    with pytest.raises(github.IssueCheckError, match="acme-bot"):
-        github.resolve_owner_type("acme-bot")
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout("Bot\n"))
+    with pytest.raises(gh.PlateError, match="acme-bot"):
+        gh.resolve_owner_type("acme-bot")
 
 
 # --- _search_issues / fetch_assigned_issues / fetch_owner_issues -------------
@@ -309,7 +313,7 @@ def _search_payload(
 
 
 def _paged_fake_run(pages: list[str]) -> Any:
-    """A fake ``_run`` that returns ``pages`` in order, one gh call each."""
+    """A fake ``run_command`` that returns ``pages`` in order, one gh call each."""
     calls = {"n": 0}
 
     def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -323,8 +327,8 @@ def _paged_fake_run(pages: list[str]) -> Any:
 
 def test_fetch_assigned_issues_single_page(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        github,
-        "_run",
+        gh,
+        "run_command",
         _paged_fake_run([_search_payload(2, [{"number": 1}, {"number": 2}])]),
     )
     issues, total = github.fetch_assigned_issues("an-org/a-repo", "alice", 10)
@@ -338,8 +342,8 @@ def test_fetch_assigned_issues_gh_failure_raises_with_repo(
     def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args, 1, stdout="", stderr="boom")
 
-    monkeypatch.setattr(github, "_run", fake_run)
-    with pytest.raises(github.IssueCheckError, match="an-org/a-repo"):
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    with pytest.raises(gh.PlateError, match="an-org/a-repo"):
         github.fetch_assigned_issues("an-org/a-repo", "alice", 10)
 
 
@@ -354,7 +358,7 @@ def test_fetch_owner_issues_issues_the_expected_query(
             args, 0, stdout=_search_payload(0, []), stderr=""
         )
 
-    monkeypatch.setattr(github, "_run", fake_run)
+    monkeypatch.setattr(gh, "run_command", fake_run)
     github.fetch_owner_issues("acme", "organization", "alice", 10, mine=True)
 
     q_arg = next(a for a in captured["args"] if a.startswith("q="))
@@ -372,7 +376,7 @@ def test_fetch_owner_issues_paginates_across_pages(
         _search_payload(3, [{"number": 3}]),
     ]
     fake_run = _paged_fake_run(pages)
-    monkeypatch.setattr(github, "_run", fake_run)
+    monkeypatch.setattr(gh, "run_command", fake_run)
 
     issues, total = github.fetch_owner_issues(
         "acme", "organization", "alice", 10, mine=False
@@ -398,7 +402,7 @@ def test_fetch_owner_issues_truncates_at_limit(
             stderr="",
         )
 
-    monkeypatch.setattr(github, "_run", fake_run)
+    monkeypatch.setattr(gh, "run_command", fake_run)
     issues, total = github.fetch_owner_issues(
         "acme", "organization", "alice", 5, mine=False
     )
@@ -412,6 +416,6 @@ def test_fetch_owner_issues_gh_failure_raises_with_owner(
     def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args, 1, stdout="", stderr="boom")
 
-    monkeypatch.setattr(github, "_run", fake_run)
-    with pytest.raises(github.IssueCheckError, match="acme"):
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    with pytest.raises(gh.PlateError, match="acme"):
         github.fetch_owner_issues("acme", "organization", "alice", 5, mine=False)

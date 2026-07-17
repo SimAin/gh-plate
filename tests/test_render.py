@@ -1,9 +1,9 @@
-"""Tests for issue_check.render — the pure presentation/tree layer."""
+"""Tests for plate.issues.render — the pure presentation/tree layer."""
 
 from __future__ import annotations
 
-from issue_check import render
-from issue_check.model import IssueRow, SprintRow, SprintView, TreeNode
+from plate.issues import render
+from plate.issues.model import IssueRow, SprintRow, SprintView, TreeNode
 
 
 def make_row(
@@ -139,7 +139,7 @@ def test_format_labels_unchanged_without_resolver() -> None:
 
 
 def test_markdown_bolds_special_label_and_drops_hidden() -> None:
-    from issue_check.model import TreeNode
+    from plate.issues.model import TreeNode
 
     row = make_row(5, title="T", labels=["blocked", "bug", "noise"])
     resolver = {"blocked": "alert", "noise": "hide"}.get
@@ -215,7 +215,7 @@ def test_terminal_tree_no_links_when_color_off() -> None:
 
 
 def test_pr_marker_beside_health_glyph() -> None:
-    from issue_check.model import PR_DRAFT, PR_MERGED
+    from plate.issues.model import PR_DRAFT, PR_MERGED
 
     forest = [
         TreeNode(make_row(5, title="Has draft PR", pr_state=PR_DRAFT, pr_number=99), 0),
@@ -234,7 +234,7 @@ def test_pr_marker_beside_health_glyph() -> None:
 
 
 def test_pr_marker_colours_merged_green_closed_red() -> None:
-    from issue_check.model import PR_CLOSED, PR_MERGED, PR_OPEN
+    from plate.issues.model import PR_CLOSED, PR_MERGED, PR_OPEN
 
     merged = render._pr_marker(PR_MERGED, use_color=True)
     closed = render._pr_marker(PR_CLOSED, use_color=True)
@@ -244,7 +244,7 @@ def test_pr_marker_colours_merged_green_closed_red() -> None:
 
 
 def test_pr_marker_shown_in_markdown_with_number() -> None:
-    from issue_check.model import PR_OPEN
+    from plate.issues.model import PR_OPEN
 
     row = make_row(5, title="T", pr_state=PR_OPEN, pr_number=99)
     out = render.markdown_tree([TreeNode(row, 0)])

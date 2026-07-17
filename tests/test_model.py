@@ -1,11 +1,11 @@
-"""Tests for issue_check.model — the pure domain/tree layer."""
+"""Tests for plate.issues.model — the pure domain/tree layer."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from issue_check import model
+from plate.issues import model
 
 NOW = datetime(2026, 6, 22, tzinfo=UTC)
 

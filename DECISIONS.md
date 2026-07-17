@@ -1,6 +1,6 @@
 # Decision log
 
-Design decisions for `issue-check`, with the reasoning behind each. Recorded during
+Design decisions for `plate` (formerly `issue-check`), with the reasoning behind each. Recorded during
 the planning exploration; see `MVP.md` for the slice that shipped.
 
 ---
@@ -164,6 +164,50 @@ PRs kept small and independently reviewable: repo-qualified model identity +
 `group_by_repo` (#44), the owner-scoped search + `resolve_owner_type` (#45), the
 `owners` config block + `resolve_owner` (#46), and the owner renderers (#47); this
 view is the CLI wiring that ties them together.
+
+---
+
+## D8 — `core`/domain package split, enforced by a boundary test (issue #50)
+
+**Decision:** The package is renamed `plate` and restructured into `plate/core/`
+(shared, domain-agnostic plumbing: `gh.py`, `render.py`, `config.py`) plus one
+directory per domain — today `plate/issues/` (`model.py`, `github.py`,
+`render.py`, `cli.py`), with `plate/prs/` planned to sit beside it (issue #53).
+The rule: a domain package may import `plate.core`, but never another domain
+package, and `plate.core` never imports a domain package back. This is not a
+convention left to reviewers to catch — `tests/test_boundaries.py` walks the
+AST of every file under each domain directory and under `plate/core/` and
+fails with the offending file + import if the rule is ever broken, discovering
+new domain directories automatically (by scanning `src/plate/` for package
+dirs other than `core`) so a future `plate/prs/` is covered with zero changes
+to the test.
+
+**Why:** This is the founding constraint of the `gh-pr-status` absorption epic
+(#50): the plan is to fold a sibling PR-status tool into this repo as a second
+domain (`plate/prs/`) rather than maintain two near-identical CLIs. That only
+works if the two domains stay genuinely independent — sharing `git`/`gh`
+plumbing and presentation primitives, never reaching into each other's models
+or renderers. Deciding and enforcing the boundary now, while there is still
+only one domain, is cheaper than retrofitting it once `plate/prs/` exists and
+some shortcut has already grown a cross-domain import. `gh-issue-check` is
+renamed to `plate` because the tool's identity is no longer "the issue
+checker" once a second domain sits beside it. The rename is a hard switch —
+no `issue-check` alias: rollback is git history plus versioned releases, and
+the tool's consumers are known personally (epic #50, decision 2 as revised).
+
+**Consequence:** `github.py` splits into `core/gh.py` (the shared
+`run_command` subprocess chokepoint, `PlateError`, and repo/login/owner-type
+resolution — nothing issue-specific) and `issues/github.py` (the Issues search
+and Projects v2 board GraphQL, built on `core/gh.py`). `render.py` splits into
+`core/render.py` (ANSI/width primitives with no opinion on what they're
+rendering) and `issues/render.py` (the issue tree, sprint table, and
+owner-wide view). `config.py` moves wholesale into `core/` since config is
+domain-agnostic today; `model.py` moves wholesale into `issues/` since it's
+entirely issue-shaped. `cli.py` splits into a thin top-level `plate/cli.py`
+(parser assembly + dispatch only) and `issues/cli.py` (the `issues`
+subcommand's flags and `run()` logic), following the subcommand skeleton
+landed just before this split. `IssueCheckError` is renamed `PlateError` since
+it is no longer issue-specific — every domain's failures surface through it.
 
 ---
 

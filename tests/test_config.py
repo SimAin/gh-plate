@@ -1,4 +1,4 @@
-"""Tests for issue_check.config — special-label configuration."""
+"""Tests for plate.core.config — special-label configuration."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from issue_check import config
-from issue_check.github import IssueCheckError
+from plate.core import config
+from plate.core.gh import PlateError
 
 
 def test_defaults_when_no_file(tmp_path) -> None:
@@ -44,14 +44,14 @@ def test_style_for_supports_globs(tmp_path) -> None:
 def test_unknown_style_is_rejected(tmp_path) -> None:
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"labels": {"blocked": "explode"}}))
-    with pytest.raises(IssueCheckError, match="Unknown style"):
+    with pytest.raises(PlateError, match="Unknown style"):
         config.load_config(str(path))
 
 
 def test_malformed_json_is_rejected(tmp_path) -> None:
     path = tmp_path / "config.json"
     path.write_text("{not json")
-    with pytest.raises(IssueCheckError, match="Could not read config"):
+    with pytest.raises(PlateError, match="Could not read config"):
         config.load_config(str(path))
 
 
@@ -84,7 +84,7 @@ def test_parse_project_url(value, expected) -> None:
 
 
 def test_parse_project_url_rejects_garbage() -> None:
-    with pytest.raises(IssueCheckError, match="Could not parse project reference"):
+    with pytest.raises(PlateError, match="Could not parse project reference"):
         config.parse_project_url("https://example.com/not-a-project")
 
 
@@ -186,7 +186,7 @@ def test_repos_block_honours_field_and_status_overrides(tmp_path) -> None:
 def test_repos_requires_project(tmp_path) -> None:
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"repos": {"an-org/a-repo": {}}}))
-    with pytest.raises(IssueCheckError, match='needs a "project"'):
+    with pytest.raises(PlateError, match='needs a "project"'):
         config.load_config(str(path))
 
 
@@ -204,7 +204,7 @@ def test_repos_status_order_must_be_list_of_strings(tmp_path) -> None:
             }
         )
     )
-    with pytest.raises(IssueCheckError, match='"statusOrder" must be a list'):
+    with pytest.raises(PlateError, match='"statusOrder" must be a list'):
         config.load_config(str(path))
 
 
@@ -230,28 +230,28 @@ def test_owners_keys_are_normalized(tmp_path) -> None:
 def test_owners_block_must_be_an_object(tmp_path) -> None:
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"owners": ["work", "my-work-org"]}))
-    with pytest.raises(IssueCheckError, match='"owners" must be an object'):
+    with pytest.raises(PlateError, match='"owners" must be an object'):
         config.load_config(str(path))
 
 
 def test_owners_value_must_be_a_string(tmp_path) -> None:
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"owners": {"work": 123}}))
-    with pytest.raises(IssueCheckError, match='"owners" must be an object'):
+    with pytest.raises(PlateError, match='"owners" must be an object'):
         config.load_config(str(path))
 
 
 def test_owners_value_must_not_be_empty(tmp_path) -> None:
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"owners": {"work": "   "}}))
-    with pytest.raises(IssueCheckError, match='"owners" must be an object'):
+    with pytest.raises(PlateError, match='"owners" must be an object'):
         config.load_config(str(path))
 
 
 def test_owners_alias_must_not_be_empty(tmp_path) -> None:
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"owners": {"   ": "my-work-org"}}))
-    with pytest.raises(IssueCheckError, match='"owners" must be an object'):
+    with pytest.raises(PlateError, match='"owners" must be an object'):
         config.load_config(str(path))
 
 

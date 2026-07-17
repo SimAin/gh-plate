@@ -6,7 +6,7 @@ so the user can name them here and have the renderer call them out. It stays in
 the user's control and is easy to update — that is the whole point.
 
 The one module that reads a config file. Kept apart from the GitHub I/O so the
-model/render layers stay pure; failures surface as :class:`IssueCheckError`.
+model/render layers stay pure; failures surface as :class:`PlateError`.
 
 Config is JSON (stdlib-parseable on the 3.11 floor, no new dependency) mapping a
 label name to a *style*. Matching is case-insensitive and supports ``*`` globs
@@ -30,7 +30,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from .github import IssueCheckError
+from .gh import PlateError
 
 # Recognised styles. The renderer owns how each *looks*; here we only validate.
 #   alert -> red, warn -> gold, info -> green  (all promoted to the cell front)
@@ -76,7 +76,7 @@ def parse_project_url(value: str) -> tuple[str, str, int]:
 
     Accepts ``https://github.com/orgs/OWNER/projects/N`` (and the ``users/``
     form), with any trailing ``/views/M`` etc., plus shorthand
-    ``OWNER/projects/N`` (assumed an org). Raises :class:`IssueCheckError`.
+    ``OWNER/projects/N`` (assumed an org). Raises :class:`PlateError`.
     """
     text = value.strip()
     match = _PROJECT_URL_RE.match(text)
@@ -86,7 +86,7 @@ def parse_project_url(value: str) -> tuple[str, str, int]:
     match = _PROJECT_SHORT_RE.match(text)
     if match:
         return match.group("owner"), "organization", int(match.group("num"))
-    raise IssueCheckError(
+    raise PlateError(
         f"Could not parse project reference {value!r}. Expected a URL like "
         "https://github.com/orgs/OWNER/projects/N (or .../users/OWNER/projects/N), "
         "or shorthand OWNER/projects/N."
@@ -154,10 +154,10 @@ def config_path() -> str:
 def _parse_repo_settings(repo: Any, settings: Any) -> ProjectConfig:
     """Validate one ``repos`` entry into a :class:`ProjectConfig`."""
     if not isinstance(settings, dict):
-        raise IssueCheckError(f"Config for repo {repo!r} must be an object.")
+        raise PlateError(f"Config for repo {repo!r} must be an object.")
     project = settings.get("project")
     if not isinstance(project, str) or not project.strip():
-        raise IssueCheckError(
+        raise PlateError(
             f'Repo {repo!r} needs a "project" reference '
             "(e.g. https://github.com/orgs/OWNER/projects/N)."
         )
@@ -165,14 +165,14 @@ def _parse_repo_settings(repo: Any, settings: Any) -> ProjectConfig:
     sprint_field = settings.get("sprintField", DEFAULT_SPRINT_FIELD)
     status_field = settings.get("statusField", DEFAULT_STATUS_FIELD)
     if not isinstance(sprint_field, str) or not isinstance(status_field, str):
-        raise IssueCheckError(
+        raise PlateError(
             f'Repo {repo!r}: "sprintField" and "statusField" must be strings.'
         )
     raw_order = settings.get("statusOrder", [])
     if not isinstance(raw_order, list) or not all(
         isinstance(item, str) for item in raw_order
     ):
-        raise IssueCheckError(
+        raise PlateError(
             f'Repo {repo!r}: "statusOrder" must be a list of status names.'
         )
     return ProjectConfig(
@@ -189,13 +189,13 @@ def parse_config(data: Any) -> Config:
     """Validate a decoded-JSON object into a :class:`Config` (over the defaults)."""
     styles = dict(DEFAULT_LABEL_STYLES)
     if not isinstance(data, dict):
-        raise IssueCheckError("Config root must be a JSON object.")
+        raise PlateError("Config root must be a JSON object.")
     labels = data.get("labels", {})
     if not isinstance(labels, dict):
-        raise IssueCheckError('Config "labels" must be an object of name -> style.')
+        raise PlateError('Config "labels" must be an object of name -> style.')
     for name, style in labels.items():
         if not isinstance(style, str) or style not in LABEL_STYLES:
-            raise IssueCheckError(
+            raise PlateError(
                 f"Unknown style {style!r} for label {name!r}. "
                 f"Valid styles: {', '.join(LABEL_STYLES)}."
             )
@@ -204,7 +204,7 @@ def parse_config(data: Any) -> Config:
     projects: dict[str, ProjectConfig] = {}
     repos = data.get("repos", {})
     if not isinstance(repos, dict):
-        raise IssueCheckError(
+        raise PlateError(
             'Config "repos" must be an object of OWNER/REPO -> settings.'
         )
     for repo, settings in repos.items():
@@ -213,17 +213,17 @@ def parse_config(data: Any) -> Config:
     owners: dict[str, str] = {}
     raw_owners = data.get("owners", {})
     if not isinstance(raw_owners, dict):
-        raise IssueCheckError(
+        raise PlateError(
             'Config "owners" must be an object of alias -> owner name.'
         )
     for alias, owner in raw_owners.items():
         if not isinstance(alias, str) or not alias.strip():
-            raise IssueCheckError(
+            raise PlateError(
                 'Config "owners" must be an object of alias -> owner name '
                 f"(got a blank alias for {owner!r})."
             )
         if not isinstance(owner, str) or not owner.strip():
-            raise IssueCheckError(
+            raise PlateError(
                 'Config "owners" must be an object of alias -> owner name '
                 f"(alias {alias!r} needs a non-empty owner name)."
             )
@@ -241,5 +241,5 @@ def load_config(path: str | None = None) -> Config:
         with open(target, encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, json.JSONDecodeError) as exc:
-        raise IssueCheckError(f"Could not read config at {target}: {exc}") from exc
+        raise PlateError(f"Could not read config at {target}: {exc}") from exc
     return parse_config(data)
