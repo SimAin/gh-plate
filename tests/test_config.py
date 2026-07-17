@@ -10,6 +10,19 @@ from plate.core import config
 from plate.core.gh import PlateError
 
 
+@pytest.fixture(autouse=True)
+def _isolated_config_env(tmp_path, monkeypatch):
+    """Give every test a clean, isolated $HOME with no config env vars set.
+
+    config_path() is pure, but its default still depends on $HOME/
+    $XDG_CONFIG_HOME, which would otherwise leak in from whoever/wherever the
+    tests run.
+    """
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("PLATE_CONFIG", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+
 def test_defaults_when_no_file(tmp_path) -> None:
     missing = tmp_path / "nope.json"
     cfg = config.load_config(str(missing))
@@ -55,9 +68,18 @@ def test_malformed_json_is_rejected(tmp_path) -> None:
         config.load_config(str(path))
 
 
-def test_config_path_honours_env(monkeypatch) -> None:
-    monkeypatch.setenv("ISSUE_CHECK_CONFIG", "/custom/loc.json")
-    assert config.config_path() == "/custom/loc.json"
+# --- config_path() resolution --------------------------------------------------
+
+
+def test_config_path_plate_config_env_wins(tmp_path, monkeypatch) -> None:
+    override = tmp_path / "elsewhere.json"
+    monkeypatch.setenv("PLATE_CONFIG", str(override))
+    assert config.config_path() == str(override)
+
+
+def test_config_path_default_under_xdg_config_home(tmp_path) -> None:
+    expected = tmp_path / ".config" / "plate" / "config.json"
+    assert config.config_path() == str(expected)
 
 
 # --- sprint board (repos block) ----------------------------------------------

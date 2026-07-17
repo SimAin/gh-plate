@@ -143,12 +143,18 @@ class Config:
 
 
 def config_path() -> str:
-    """The resolved config location: ``$ISSUE_CHECK_CONFIG`` or the XDG default."""
-    env = os.environ.get("ISSUE_CHECK_CONFIG")
+    """The config path that would be read, absent an explicit ``--config``.
+
+    ``$PLATE_CONFIG`` if set, else ``~/.config/plate/config.json`` (honouring
+    ``$XDG_CONFIG_HOME`` if set). Pure — no filesystem probing.
+    """
+    env = os.environ.get("PLATE_CONFIG")
     if env:
         return env
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    return os.path.join(base, "issue-check", "config.json")
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser(
+        "~/.config"
+    )
+    return os.path.join(xdg_config_home, "plate", "config.json")
 
 
 def _parse_repo_settings(repo: Any, settings: Any) -> ProjectConfig:
