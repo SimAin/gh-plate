@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/SimAin/gh-issue-check/compare/v0.4.1...v0.5.0) (2026-07-16)
+
+
+### Features
+
+* **cli:** add owner-wide issue view via --owner ([48c465b](https://github.com/SimAin/gh-issue-check/commit/48c465ba6becc4bc2bbed46f11e5bf004ada973d))
+* **cli:** add owner-wide issue view via --owner ([2e7c010](https://github.com/SimAin/gh-issue-check/commit/2e7c01069f9601472c1f6502511c2be6ca8460a6)), closes [#43](https://github.com/SimAin/gh-issue-check/issues/43)
+
 ## [0.4.1](https://github.com/SimAin/gh-issue-check/compare/v0.4.0...v0.4.1) (2026-07-14)
 
 
