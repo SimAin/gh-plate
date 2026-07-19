@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.0.0](https://github.com/SimAin/gh-issue-check/compare/v0.5.0...v1.0.0) (2026-07-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* **config:** ~/.config/issue-check/config.json and $ISSUE_CHECK_CONFIG are no longer read; use ~/.config/plate/config.json or $PLATE_CONFIG.
+* the distribution and import package are renamed and the issue-check command is removed (hard switch, epic #50 decision 2); use `plate issues`.
+* **cli:** the issue-check command is gone; use `plate issues`.
+
+### Features
+
+* **cli:** introduce plate CLI with issues subcommand ([129ddbe](https://github.com/SimAin/gh-issue-check/commit/129ddbedad8154cf38611a2407fd4f4febf8df7c))
+* **config:** move config to ~/.config/plate (hard switch) ([28e0219](https://github.com/SimAin/gh-issue-check/commit/28e021985eeed25a36344a4d75772016242d80cb))
+
+
+### Code Refactoring
+
+* restructure into plate/core and plate/issues packages ([70a2b00](https://github.com/SimAin/gh-issue-check/commit/70a2b00bcc200b88d37924f93a49459acb85ee05))
+
 ## [0.5.0](https://github.com/SimAin/gh-issue-check/compare/v0.4.1...v0.5.0) (2026-07-16)
 
 
