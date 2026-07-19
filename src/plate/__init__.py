@@ -1,3 +1,3 @@
 """plate: a terminal status table for GitHub work (issues today, PRs next)."""
 
-__version__ = "1.0.0"  # x-release-please-version
+__version__ = "1.1.0"  # x-release-please-version

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.0](https://github.com/SimAin/gh-plate/compare/v1.0.0...v1.1.0) (2026-07-19)
+
+
+### Features
+
+* **prs:** add the owner-wide PR view ([b449308](https://github.com/SimAin/gh-plate/commit/b449308aa4b14ffd596b1c9b70ff5c366a140e62))
+* **prs:** add the PR renderers ([4010868](https://github.com/SimAin/gh-plate/commit/40108689abfb616761d7993a322ac8abe2e656f4))
+* **prs:** owner-wide PR view — plate prs --owner ([9f80d3b](https://github.com/SimAin/gh-plate/commit/9f80d3b3517ef6e4473674bf9ea3444b383467de))
+* **prs:** PR domain model — PrRow, states, grouping (53.1) ([951401b](https://github.com/SimAin/gh-plate/commit/951401bb7dd661feed96c79d24ddf3b690622d7f))
+* **prs:** PR fetch layer — GraphQL query + pagination (53.2) ([3c578bb](https://github.com/SimAin/gh-plate/commit/3c578bb66b2d7593250a326d7159d369e83c4f0c))
+* **prs:** PR renderers — terminal table + markdown (53.3) ([538a0d0](https://github.com/SimAin/gh-plate/commit/538a0d070caf01ee9a3747a55348a308fcfa21c6))
+* **prs:** wire up 'plate prs' + parity check (53.4) ([423042d](https://github.com/SimAin/gh-plate/commit/423042deafa16ef1902e31696083d75d1beed379))
+* **prs:** wire up the plate prs subcommand ([a7375fd](https://github.com/SimAin/gh-plate/commit/a7375fdd1dbfe703cd877a22a3358cf421f17562))
+
 ## [1.0.0](https://github.com/SimAin/gh-issue-check/compare/v0.5.0...v1.0.0) (2026-07-19)
 
 
