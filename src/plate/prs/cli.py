@@ -22,10 +22,11 @@ import argparse
 import sys
 from datetime import UTC, datetime
 
-from plate.core import gh
+from plate.core import config, gh
+from plate.core.gh import PlateError
 
 from . import github, render
-from .model import normalize_rows, summary_counts
+from .model import group_by_repo, normalize_rows, summary_counts
 
 DEFAULT_LIMIT = 500
 DEFAULT_STALE_DAYS = 14
@@ -41,9 +42,21 @@ def _positive_int(value: str) -> int:
 
 
 def _add_prs_flags(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument(
         "--repo",
         help="GitHub repository as OWNER/REPO. Defaults to the current git repo.",
+    )
+    scope.add_argument(
+        "--owner",
+        help="Show open PRs across every repository of a GitHub organization "
+        "or user account, grouped by repo. Accepts a configured alias (see "
+        "README).",
+    )
+    parser.add_argument(
+        "--mine",
+        action="store_true",
+        help="With --owner, narrow to PRs you authored.",
     )
     parser.add_argument(
         "--limit",
@@ -83,8 +96,10 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     """Register the ``prs`` subparser (with its flags) on ``subparsers``."""
     prs = subparsers.add_parser(
         "prs",
-        help="Status table for open GitHub pull requests in a repository.",
-        description="Status table for open GitHub pull requests in a repository.",
+        help="Status table for open GitHub pull requests in a repository, or "
+        "across every repository of an owner with --owner.",
+        description="Status table for open GitHub pull requests in a repository, "
+        "or across every repository of an owner with --owner.",
     )
     _add_prs_flags(prs)
 
@@ -96,7 +111,23 @@ def _use_color(args: argparse.Namespace) -> bool:
 
 
 def run(args: argparse.Namespace) -> int:
+    if args.mine and not args.owner:
+        raise PlateError(
+            "--mine only applies with --owner. The repo view already shows every "
+            "open PR grouped into yours / to review / the rest, so --mine on its "
+            "own would do nothing."
+        )
+
+    if args.owner:
+        # The owner view is not tied to a checkout, so it must not require a git
+        # repo — never call gh.current_repo() on this path (#54).
+        return _run_owner(args)
+
     repo = args.repo or gh.current_repo()
+    return _run_repo(args, repo)
+
+
+def _run_repo(args: argparse.Namespace, repo: str) -> int:
     login, prs = github.fetch_prs_and_viewer(repo, args.limit)
 
     if not prs:
@@ -104,7 +135,7 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     rows = normalize_rows(
-        prs, login, now=datetime.now(UTC), stale_days=args.stale_days
+        prs, login, now=datetime.now(UTC), stale_days=args.stale_days, repo=repo
     )
 
     if args.format == "markdown":
@@ -132,4 +163,85 @@ def run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
 
+    return 0
+
+
+def _run_owner(args: argparse.Namespace) -> int:
+    # Parallel to plate.issues.cli._run_owner (not imported — the domains stay
+    # independent, see DECISIONS.md D8): resolve any alias, resolve the owner
+    # type (which doubles as validation), fetch, group by repo, render.
+    cfg = config.load_config()
+
+    login = gh.current_login()
+    if login is None:
+        raise PlateError(
+            "Could not determine your GitHub login (is `gh` authenticated?).\n"
+            "The owner PR view groups into yours / to review and cannot run "
+            "without it."
+        )
+
+    resolved = cfg.resolve_owner(args.owner)
+    # Show the alias mapping only when one actually fired (the resolver folds
+    # case, so compare after resolution); a literal owner shows just its name.
+    alias_fired = resolved != args.owner
+    display = f"{args.owner} → {resolved}" if alias_fired else args.owner
+
+    try:
+        owner_type = gh.resolve_owner_type(resolved)
+    except PlateError as exc:
+        # An unknown alias falls through resolve_owner as a literal, so a typo'd
+        # alias surfaces here as an unknown owner. If aliases are configured,
+        # list them so the user can spot the one they meant.
+        if cfg.owners:
+            aliases = ", ".join(
+                f"{alias} → {owner}" for alias, owner in cfg.owners.items()
+            )
+            raise PlateError(f"{exc}\nConfigured aliases: {aliases}") from exc
+        raise
+
+    prs, total = github.fetch_owner_prs(
+        resolved, owner_type, login, args.limit, mine=args.mine
+    )
+    if not prs:
+        if args.mine:
+            print(f"No open PRs authored by you for {display}.")
+        else:
+            print(f"No open PRs found for {display}.")
+        return 0
+
+    rows = normalize_rows(
+        prs, login, now=datetime.now(UTC), stale_days=args.stale_days
+    )
+    sections = group_by_repo(rows)
+
+    if args.format == "markdown":
+        if alias_fired:
+            print(f"*{display}*")
+            print()
+        print(render.owner_markdown(sections))
+    else:
+        use_color = _use_color(args)
+        if args.show_key:
+            print(render.owner_key(use_color))
+            print()
+        if alias_fired:
+            print(render.dim(display, use_color))
+        print(render.summary_line(summary_counts(rows)))
+        print()
+        print(render.owner_table(sections, use_color, use_links=sys.stdout.isatty()))
+
+    if len(prs) < total:
+        if len(prs) == args.limit:
+            print(
+                f"\nNote: showing {len(prs)} of {total} open PRs for "
+                f"{display} (--limit {args.limit}).",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "\nNote: GitHub search returns at most 1000 results per query; "
+                f"showing {len(prs)} of {total} open PRs for {display}. "
+                "Use --mine or --repo to narrow.",
+                file=sys.stderr,
+            )
     return 0

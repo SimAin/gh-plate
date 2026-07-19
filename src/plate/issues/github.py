@@ -90,53 +90,19 @@ def _search_issues(
 ) -> tuple[list[dict[str, Any]], int]:
     """Run :data:`ISSUE_QUERY` against ``query_str``, paginating as needed.
 
-    Shared by :func:`fetch_assigned_issues` (repo-scoped) and
-    :func:`fetch_owner_issues` (owner-scoped) — both are the same GitHub
-    Issues search under ``ISSUE_QUERY``, differing only in the search
-    qualifiers they build. ``error_context`` is interpolated into the failure
-    message (e.g. a repo or an owner name) so each caller's error stays
-    specific to what it was fetching.
+    A thin delegate to :func:`plate.core.gh.search_paginated` (the shared
+    cursor loop, now generalised into core so the PR owner view can reuse it),
+    binding the issue-domain GraphQL document. Shared by
+    :func:`fetch_assigned_issues` (repo-scoped) and :func:`fetch_owner_issues`
+    (owner-scoped) — both are the same Issues search under ``ISSUE_QUERY``,
+    differing only in the qualifiers they build. ``error_context`` is
+    interpolated into the failure message (e.g. a repo or an owner name).
 
     Returns ``(issues, total)`` where ``total`` is the server's own count
     (used only for the truncation note) — see :func:`fetch_owner_issues` for
     why this can exceed what pagination ever delivers.
     """
-    issues: list[dict[str, Any]] = []
-    total = 0
-    cursor: str | None = None
-
-    while True:
-        args = [
-            "gh", "api", "graphql",
-            "-f", f"query={ISSUE_QUERY}",
-            "-f", f"q={query_str}",
-        ]
-        if cursor:
-            args += ["-f", f"endCursor={cursor}"]
-
-        result = gh.run_command(args)
-        if result.returncode != 0:
-            raise gh.PlateError(
-                f"gh failed to fetch issues for {error_context}:\n"
-                f"{result.stderr.strip()}"
-            )
-        try:
-            payload = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise gh.PlateError(f"Could not parse gh response: {exc}") from exc
-        if payload.get("errors"):
-            raise gh.PlateError("GraphQL error: " + json.dumps(payload["errors"]))
-
-        search = (payload.get("data") or {}).get("search") or {}
-        total = search.get("issueCount", total)
-        issues.extend(node for node in (search.get("nodes") or []) if node)
-
-        if len(issues) >= limit:
-            return issues[:limit], total
-        page = search.get("pageInfo") or {}
-        cursor = page.get("endCursor")
-        if not page.get("hasNextPage") or not cursor:
-            return issues, total
+    return gh.search_paginated(ISSUE_QUERY, query_str, limit, error_context)
 
 
 def fetch_assigned_issues(

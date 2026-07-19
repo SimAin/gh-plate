@@ -205,3 +205,180 @@ def test_fetch_prs_and_viewer_passes_owner_and_name(
 
     assert "owner=an-org" in captured["args"]
     assert "name=a-repo" in captured["args"]
+
+
+# --- owner_search_query --------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "owner_type,qualifier",
+    [("organization", "org"), ("user", "user")],
+)
+def test_owner_search_query_uses_owner_type_qualifier(
+    owner_type: str, qualifier: str
+) -> None:
+    query = github.owner_search_query("acme", owner_type, "alice", mine=False)
+    assert query.startswith(f"{qualifier}:acme ")
+    assert "author:" not in query
+
+
+@pytest.mark.parametrize("owner_type", ["organization", "user"])
+def test_owner_search_query_always_excludes_archived_and_sorts(
+    owner_type: str,
+) -> None:
+    query = github.owner_search_query("acme", owner_type, "alice", mine=False)
+    assert "archived:false" in query
+    assert "sort:updated-desc" in query
+    assert "is:pr" in query
+    assert "is:open" in query
+
+
+def test_owner_search_query_mine_appends_author_filter() -> None:
+    # --mine means authored-by-you (DECISIONS.md D9), not involves/assignee.
+    query = github.owner_search_query("acme", "organization", "alice", mine=True)
+    assert query.endswith("author:alice")
+    assert "involves:" not in query
+    assert "assignee:" not in query
+
+
+def test_owner_search_query_mine_false_omits_author_filter() -> None:
+    query = github.owner_search_query("acme", "organization", "alice", mine=False)
+    assert "author" not in query
+
+
+# --- fetch_owner_prs -----------------------------------------------------------
+
+
+def _search_payload(
+    issue_count: int,
+    nodes: list[dict[str, Any]],
+    *,
+    has_next: bool = False,
+    end_cursor: str | None = None,
+) -> str:
+    return json.dumps(
+        {
+            "data": {
+                "search": {
+                    "issueCount": issue_count,
+                    "pageInfo": {"hasNextPage": has_next, "endCursor": end_cursor},
+                    "nodes": nodes,
+                }
+            }
+        }
+    )
+
+
+def test_fetch_owner_prs_issues_the_expected_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        captured["args"] = args
+        return subprocess.CompletedProcess(
+            args, 0, stdout=_search_payload(0, []), stderr=""
+        )
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    github.fetch_owner_prs("acme", "organization", "alice", 10, mine=True)
+
+    q_arg = next(a for a in captured["args"] if a.startswith("q="))
+    expected = github.owner_search_query("acme", "organization", "alice", mine=True)
+    assert q_arg == f"q={expected}"
+    query_arg = next(a for a in captured["args"] if a.startswith("query="))
+    assert query_arg == f"query={github.PR_OWNER_QUERY}"
+
+
+def test_fetch_owner_prs_delegates_to_core_search_paginated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_search(
+        query: str, query_str: str, limit: int, error_context: str
+    ) -> tuple[list[dict[str, Any]], int]:
+        captured.update(
+            query=query, query_str=query_str, limit=limit, error_context=error_context
+        )
+        return [{"number": 1}], 1
+
+    monkeypatch.setattr(gh, "search_paginated", fake_search)
+    prs, total = github.fetch_owner_prs("acme", "user", "alice", 7, mine=False)
+
+    assert [p["number"] for p in prs] == [1]
+    assert total == 1
+    assert captured["query"] == github.PR_OWNER_QUERY
+    assert captured["query_str"] == github.owner_search_query(
+        "acme", "user", "alice", mine=False
+    )
+    assert captured["limit"] == 7
+    assert captured["error_context"] == "acme"
+
+
+def test_fetch_owner_prs_paginates_across_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pages = [
+        _search_payload(
+            3, [{"number": 1}, {"number": 2}], has_next=True, end_cursor="CURSOR1"
+        ),
+        _search_payload(3, [{"number": 3}]),
+    ]
+    calls = {"n": 0}
+
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        stdout = pages[calls["n"]]
+        calls["n"] += 1
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    prs, total = github.fetch_owner_prs("acme", "organization", "alice", 10, mine=False)
+    assert [p["number"] for p in prs] == [1, 2, 3]
+    assert total == 3
+    assert calls["n"] == 2
+
+
+def test_fetch_owner_prs_truncates_at_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=_search_payload(
+                100,
+                [{"number": i} for i in range(1, 11)],
+                has_next=True,
+                end_cursor="CURSOR",
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    prs, total = github.fetch_owner_prs("acme", "organization", "alice", 5, mine=False)
+    assert len(prs) == 5
+    assert total == 100  # server total can exceed what limit lets through
+
+
+def test_fetch_owner_prs_gh_failure_raises_with_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="boom")
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    with pytest.raises(gh.PlateError, match="acme"):
+        github.fetch_owner_prs("acme", "organization", "alice", 5, mine=False)
+
+
+def test_pr_owner_query_carries_repository_and_pr_fields() -> None:
+    # The owner search spans repos, so every node must carry its own repo
+    # identity; the rest of the fields are exactly what the repo view reads.
+    assert "repository { nameWithOwner }" in github.PR_OWNER_QUERY
+    assert "... on PullRequest" in github.PR_OWNER_QUERY
+    for field in (
+        "isDraft", "mergeable", "totalCommentsCount", "reviewDecision",
+        "latestOpinionatedReviews", "reviewRequests", "statusCheckRollup",
+    ):
+        assert field in github.PR_OWNER_QUERY

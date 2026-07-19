@@ -169,6 +169,56 @@ def _assignee_cell(row: PrRow, width: int, use_color: bool) -> str:
     return ""
 
 
+def _pr_row_line(
+    row: PrRow,
+    columns: list[tuple[str, int, str]],
+    width_by: dict[str, int],
+    gap: str,
+    use_color: bool,
+    use_links: bool,
+) -> str:
+    """One PR data row, dimmed whole when it is neither yours nor to-review.
+
+    Shared by :func:`terminal_table` and :func:`owner_table`. "The rest" —
+    settled work in the repo view, non-actionable rows in the owner view — is
+    rendered plainly and wrapped in a single dim span, so no health colour
+    competes with the muting. The two views differ only in how rows are grouped
+    (labelled group dividers vs. repo sections), not in how a row is drawn.
+    """
+    muted = sort_group(row) == 2
+    cc = use_color and not muted
+
+    glyph, glyph_color = STATE_GLYPHS[pr_state(row)]
+    age_text = format_age(row.age_days)
+    age = (
+        colorize(age_text, SOFT_ROSE, cc)
+        if age_text and row.is_stale
+        else dim(age_text, cc)
+    )
+    values = [
+        colorize(glyph, glyph_color, cc),
+        dim(
+            hyperlink(
+                truncate(f"#{row.number}", width_by["PR"]),
+                row.url,
+                use_links,
+            ),
+            cc,
+        ),
+        truncate(row.title, width_by["Title"]),
+        _assignee_cell(row, width_by["Assignee"], cc),
+        age,
+        colorize(_review_text(row), _review_color(row), cc),
+        colorize(_check_label(row), CHECK_COLORS.get(row.check_state, ""), cc),
+        dim(_format_comments(row.comments_count), cc),
+    ]
+    line = gap.join(
+        format_cell(v, w, a)
+        for v, (_, w, a) in zip(values, columns, strict=True)
+    )
+    return dim(line, use_color) if muted else line
+
+
 def terminal_table(
     rows: list[PrRow], use_color: bool, use_links: bool = False
 ) -> str:
@@ -196,41 +246,42 @@ def terminal_table(
             label = f"{GROUP_LABELS[group]} ({group_sizes[group]})"
             lines.append(divider(label, total, use_color))
         previous_group = group
-
-        # "The rest" is settled work — render its cells plainly and dim the
-        # whole row in one wrap, so no health colour competes with the muting.
-        muted = group == 2
-        cc = use_color and not muted
-
-        glyph, glyph_color = STATE_GLYPHS[pr_state(row)]
-        age_text = format_age(row.age_days)
-        age = (
-            colorize(age_text, SOFT_ROSE, cc)
-            if age_text and row.is_stale
-            else dim(age_text, cc)
+        lines.append(
+            _pr_row_line(row, columns, width_by, gap, use_color, use_links)
         )
-        values = [
-            colorize(glyph, glyph_color, cc),
-            dim(
-                hyperlink(
-                    truncate(f"#{row.number}", width_by["PR"]),
-                    row.url,
-                    use_links,
-                ),
-                cc,
-            ),
-            truncate(row.title, width_by["Title"]),
-            _assignee_cell(row, width_by["Assignee"], cc),
-            age,
-            colorize(_review_text(row), _review_color(row), cc),
-            colorize(_check_label(row), CHECK_COLORS.get(row.check_state, ""), cc),
-            dim(_format_comments(row.comments_count), cc),
-        ]
-        line = gap.join(
-            format_cell(v, w, a)
-            for v, (_, w, a) in zip(values, columns, strict=True)
-        )
-        lines.append(dim(line, use_color) if muted else line)
+
+    return "\n".join(line.rstrip() for line in lines)
+
+
+def owner_table(
+    sections: list[tuple[str, list[PrRow]]],
+    use_color: bool,
+    use_links: bool = False,
+) -> str:
+    """The terminal owner-wide PR table: one header, a divider + rows per repo.
+
+    ``sections`` is ``model.group_by_repo``'s output (``OWNER/REPO`` -> rows),
+    already ordered most-recently-active first; that order is preserved, and so
+    is each section's within-repo fetch order. Each section opens with a divider
+    carrying ``OWNER/REPO · N open`` — the same idiom the issues owner view uses,
+    and the grouping here, so there are no yours/to-review/the-rest sub-dividers.
+    A row that is neither yours nor to-review is still dimmed whole (via
+    :func:`_pr_row_line`), the same attention discipline as the repo view.
+    """
+    columns = _columns(terminal_width())
+    width_by = {name: w for name, w, _ in columns}
+    total = sum(w for _, w, _ in columns) + COLUMN_GAP * (len(columns) - 1)
+    gap = " " * COLUMN_GAP
+
+    header = gap.join(format_cell(n, w, a) for n, w, a in columns)
+    lines = [bold(header, use_color)]
+
+    for repo, rows in sections:
+        lines.append(divider(f"{repo} · {len(rows)} open", total, use_color))
+        for row in rows:
+            lines.append(
+                _pr_row_line(row, columns, width_by, gap, use_color, use_links)
+            )
 
     return "\n".join(line.rstrip() for line in lines)
 
@@ -279,6 +330,41 @@ def symbol_key(use_color: bool) -> str:
     )
 
 
+def owner_key(use_color: bool) -> str:
+    """The ``--show-key`` text for the owner-wide PR view — distinct from
+    :func:`symbol_key`.
+
+    Same health/CI glyphs and columns as the repo view (the owner view keeps
+    them unchanged), but rows are grouped by repository — most recently active
+    repo first — rather than yours/to-review/the-rest, and a row that is neither
+    yours nor to-review is dimmed whole.
+    """
+    state_order = ["conflict", "waiting", "ready", "unknown", "draft"]
+    states = "   ".join(
+        f"{colorize(STATE_GLYPHS[s][0], STATE_GLYPHS[s][1], use_color)} "
+        f"{STATE_LABELS[s]}"
+        for s in state_order
+    )
+    ci_order = [("success", "pass"), ("failure", "fail"), ("pending", "pending")]
+    ci = "   ".join(
+        f"{colorize(CHECK_LABELS[key], CHECK_COLORS[key], use_color)} {label}"
+        for key, label in ci_order
+    )
+    return "\n".join(
+        [
+            bold("Key", use_color),
+            "  State   " + states,
+            "  CI      " + ci,
+            dim(
+                "  Rows are grouped by repository, most recently active repo "
+                "first · Age in rose = stale · dimmed rows are neither yours "
+                "nor to review",
+                use_color,
+            ),
+        ]
+    )
+
+
 def _markdown_signals(row: PrRow) -> list[str]:
     """The Signal column: the scan cues the terminal carries by weight/colour."""
     signals: list[str] = []
@@ -314,3 +400,16 @@ def markdown_table(rows: list[PrRow]) -> str:
         )
 
     return "\n".join(lines)
+
+
+def owner_markdown(sections: list[tuple[str, list[PrRow]]]) -> str:
+    """Markdown owner-wide view: a ``## OWNER/REPO`` heading + table per section.
+
+    Each section reuses :func:`markdown_table` (the same colour-free table the
+    repo view emits, Signal column and all), so a reader gets the full per-repo
+    breakdown. Sections keep ``model.group_by_repo``'s most-recently-active-first
+    order — the markdown counterpart of :func:`owner_table`.
+    """
+    return "\n\n".join(
+        f"## {repo}\n\n{markdown_table(rows)}" for repo, rows in sections
+    )
