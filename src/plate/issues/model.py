@@ -2,7 +2,7 @@
 
 Pure functions only — no subprocess, no I/O, no printing. This is where the
 tool's logic lives and what the unit tests exercise. The GraphQL shape this
-consumes is produced by :mod:`issue_check.github`.
+consumes is produced by :mod:`plate.issues.github`.
 
 The "yours" slice renders as a **tree**: every issue assigned to you is a node,
 shown beneath its parent. Ancestors that are *not* assigned to you are still

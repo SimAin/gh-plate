@@ -1,9 +1,16 @@
-"""plate — a status table for GitHub work.
+"""The ``issues`` subcommand: a status table for open GitHub issues assigned to
+you, across an owner's repositories, or a repo's current sprint board.
 
-Thin wiring layer: parse args, ask :mod:`issue_check.github` for data, hand it
-to :mod:`issue_check.model` to normalize and :mod:`issue_check.render` to format.
-All environment failures arrive as :class:`~issue_check.github.IssueCheckError`
-and are turned into a clean stderr message with a non-zero exit here.
+Thin wiring layer: parse the ``issues`` flags, ask :mod:`plate.issues.github`
+for data, hand it to :mod:`plate.issues.model` to normalize and
+:mod:`plate.issues.render` to format. Shared I/O (repo/login/owner-type
+resolution) comes from :mod:`plate.core.gh`; the JSON config from
+:mod:`plate.core.config`. All environment failures arrive as
+:class:`~plate.core.gh.PlateError`; :func:`plate.cli.main` turns them into a
+clean stderr message with a non-zero exit.
+
+Exposes :func:`add_parser` (registers the ``issues`` subparser) and
+:func:`run` (the subcommand's entry point) for :mod:`plate.cli` to wire up.
 """
 
 from __future__ import annotations
@@ -12,8 +19,10 @@ import argparse
 import sys
 from datetime import UTC, datetime
 
-from . import __version__, config, github, render
-from .github import IssueCheckError
+from plate.core import config, gh
+from plate.core.gh import PlateError
+
+from . import github, render
 from .model import build_forest, build_index, build_sprint_view, group_by_repo
 
 DEFAULT_LIMIT = 500
@@ -27,14 +36,6 @@ def _positive_int(value: str) -> int:
             f"must be a positive integer, got '{value}'"
         )
     return parsed
-
-
-def _add_version(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {__version__}",
-    )
 
 
 def _add_issues_flags(parser: argparse.ArgumentParser) -> None:
@@ -103,15 +104,8 @@ def _add_issues_flags(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="plate",
-        description="Status table for what's on your plate — open GitHub work. "
-        "Run `plate issues` for the issues you're assigned, or across every "
-        "repository of an owner with --owner.",
-    )
-    _add_version(parser)
-    subparsers = parser.add_subparsers(dest="command")
+def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Register the ``issues`` subparser (with its flags) on ``subparsers``."""
     issues = subparsers.add_parser(
         "issues",
         help="Status table for open GitHub issues assigned to you, or "
@@ -120,11 +114,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "across every repository of an owner with --owner.",
     )
     _add_issues_flags(issues)
-    return parser
-
-
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    return _build_parser().parse_args(argv)
 
 
 def _use_color(args: argparse.Namespace) -> bool:
@@ -139,31 +128,31 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     if args.mine and not args.owner:
-        raise IssueCheckError(
+        raise PlateError(
             "--mine only applies with --owner. The default view already shows "
             "only your assigned issues, so --mine on its own would do nothing."
         )
     if args.sprint and args.owner:
-        raise IssueCheckError(
+        raise PlateError(
             "--sprint is per-repo and cannot be combined with --owner. Run "
             "--sprint on the current repo (or with --repo OWNER/REPO)."
         )
 
     cfg = config.load_config(args.config)
 
-    login = github.current_login()
+    login = gh.current_login()
     if login is None:
-        raise IssueCheckError(
+        raise PlateError(
             "Could not determine your GitHub login (is `gh` authenticated?).\n"
-            "issue-check groups by assignee and cannot run without it."
+            "plate groups by assignee and cannot run without it."
         )
 
     if args.owner:
         # The owner view is not tied to a checkout, so it must not require a git
-        # repo — never call github.current_repo() on this path (#43).
+        # repo — never call gh.current_repo() on this path (#43).
         return _run_owner(args, cfg, login)
 
-    repo = args.repo or github.current_repo()
+    repo = args.repo or gh.current_repo()
     if args.sprint:
         return _run_sprint(args, cfg, repo, login)
     return _run_yours(args, cfg, repo, login)
@@ -207,8 +196,8 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config, login: str) -> int:
     display = f"{args.owner} → {resolved}" if alias_fired else args.owner
 
     try:
-        owner_type = github.resolve_owner_type(resolved)
-    except IssueCheckError as exc:
+        owner_type = gh.resolve_owner_type(resolved)
+    except PlateError as exc:
         # An unknown alias falls through resolve_owner as a literal, so a typo'd
         # alias surfaces here as an unknown owner. If aliases are configured,
         # list them so the user can spot the one they meant.
@@ -216,7 +205,7 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config, login: str) -> int:
             aliases = ", ".join(
                 f"{alias} → {owner}" for alias, owner in cfg.owners.items()
             )
-            raise IssueCheckError(
+            raise PlateError(
                 f"{exc}\nConfigured aliases: {aliases}"
             ) from exc
         raise
@@ -279,7 +268,7 @@ def _run_sprint(
 ) -> int:
     project = cfg.project_for(repo)
     if project is None:
-        raise IssueCheckError(
+        raise PlateError(
             f"No sprint board configured for {repo}.\n"
             "Add a \"repos\" entry mapping it to a GitHub project board in your "
             f"config ({args.config or config.config_path()}). See the README."
@@ -328,22 +317,3 @@ def _run_sprint(
             print()
         print(render.sprint_table(view, use_color, cfg.style_for))
     return 0
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-    if args.command is None:
-        # Bare `plate`: show the top-level help and point at the issues view.
-        parser.print_help()
-        print("\nHint: run `plate issues` to see the issues assigned to you.")
-        return 0
-    try:
-        return run(args)
-    except IssueCheckError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

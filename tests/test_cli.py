@@ -1,4 +1,5 @@
-"""Tests for issue_check.cli — argument parsing and the run() dispatch."""
+"""Tests for plate.cli (top-level dispatch) and plate.issues.cli (the
+``issues`` subcommand: flags + run() dispatch)."""
 
 from __future__ import annotations
 
@@ -7,8 +8,11 @@ from typing import Any
 
 import pytest
 
-from issue_check import __version__, cli, config, github
-from issue_check.github import IssueCheckError
+from plate import __version__, cli
+from plate.core import config, gh
+from plate.core.gh import PlateError
+from plate.issues import cli as issues_cli
+from plate.issues import github
 
 
 def test_version_flag_prints_version_and_exits(capsys) -> None:
@@ -58,8 +62,8 @@ def test_valid_stale_days_still_parses() -> None:
 
 def test_defaults_when_not_given() -> None:
     args = cli.parse_args(["issues"])
-    assert args.limit == cli.DEFAULT_LIMIT
-    assert args.stale_days == cli.DEFAULT_STALE_DAYS
+    assert args.limit == issues_cli.DEFAULT_LIMIT
+    assert args.stale_days == issues_cli.DEFAULT_STALE_DAYS
 
 
 # --- owner view (--owner) ----------------------------------------------------
@@ -108,9 +112,9 @@ def _stub_owner(
     monkeypatch.setattr(
         config, "load_config", lambda *a, **k: cfg or config.Config()
     )
-    monkeypatch.setattr(github, "current_login", lambda: login)
-    monkeypatch.setattr(github, "current_repo", _boom_current_repo)
-    monkeypatch.setattr(github, "resolve_owner_type", lambda owner: owner_type)
+    monkeypatch.setattr(gh, "current_login", lambda: login)
+    monkeypatch.setattr(gh, "current_repo", _boom_current_repo)
+    monkeypatch.setattr(gh, "resolve_owner_type", lambda owner: owner_type)
 
     def fake_fetch(
         owner: str, otype: str, lg: str, limit: int, *, mine: bool
@@ -130,35 +134,35 @@ def test_owner_and_repo_are_mutually_exclusive(capsys) -> None:
 
 
 def test_mine_without_owner_errors() -> None:
-    with pytest.raises(IssueCheckError) as excinfo:
-        cli.run(cli.parse_args(["issues", "--mine"]))
+    with pytest.raises(PlateError) as excinfo:
+        issues_cli.run(cli.parse_args(["issues", "--mine"]))
     assert "--mine only applies with --owner" in str(excinfo.value)
 
 
 def test_sprint_with_owner_errors() -> None:
-    with pytest.raises(IssueCheckError) as excinfo:
-        cli.run(cli.parse_args(["issues", "--owner", "an-org", "--sprint"]))
+    with pytest.raises(PlateError) as excinfo:
+        issues_cli.run(cli.parse_args(["issues", "--owner", "an-org", "--sprint"]))
     assert "--sprint is per-repo" in str(excinfo.value)
 
 
 def test_owner_flow_never_calls_current_repo(monkeypatch, capsys) -> None:
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
     # _boom_current_repo would raise if the owner path touched it.
-    assert cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
+    assert issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
     assert "repo-a" in capsys.readouterr().out
 
 
 def test_owner_alias_resolves_and_shows_arrow(monkeypatch, capsys) -> None:
     cfg = config.Config(owners={"work": "company-org"})
     calls = _stub_owner(monkeypatch, issues=[_issue(1)], total=1, cfg=cfg)
-    assert cli.run(cli.parse_args(["issues", "--owner", "work"])) == 0
+    assert issues_cli.run(cli.parse_args(["issues", "--owner", "work"])) == 0
     assert calls["owner"] == "company-org"  # fetch got the resolved name
     assert "work → company-org" in capsys.readouterr().out
 
 
 def test_owner_literal_shows_no_arrow(monkeypatch, capsys) -> None:
     calls = _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
-    assert cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
+    assert issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
     assert calls["owner"] == "an-org"
     assert "→" not in capsys.readouterr().out
 
@@ -168,11 +172,11 @@ def test_owner_type_failure_lists_aliases(monkeypatch, capsys) -> None:
     _stub_owner(monkeypatch, issues=[], total=0, cfg=cfg)
 
     def fail(owner: str) -> str:
-        raise IssueCheckError(f"GitHub owner '{owner}' not found or not accessible.")
+        raise PlateError(f"GitHub owner '{owner}' not found or not accessible.")
 
-    monkeypatch.setattr(github, "resolve_owner_type", fail)
-    with pytest.raises(IssueCheckError) as excinfo:
-        cli.run(cli.parse_args(["issues", "--owner", "typo"]))
+    monkeypatch.setattr(gh, "resolve_owner_type", fail)
+    with pytest.raises(PlateError) as excinfo:
+        issues_cli.run(cli.parse_args(["issues", "--owner", "typo"]))
     message = str(excinfo.value)
     assert "Configured aliases:" in message
     assert "work → company-org" in message
@@ -183,23 +187,25 @@ def test_owner_type_failure_without_aliases_has_no_alias_line(monkeypatch) -> No
     _stub_owner(monkeypatch, issues=[], total=0)
 
     def fail(owner: str) -> str:
-        raise IssueCheckError(f"GitHub owner '{owner}' not found or not accessible.")
+        raise PlateError(f"GitHub owner '{owner}' not found or not accessible.")
 
-    monkeypatch.setattr(github, "resolve_owner_type", fail)
-    with pytest.raises(IssueCheckError) as excinfo:
-        cli.run(cli.parse_args(["issues", "--owner", "nope"]))
+    monkeypatch.setattr(gh, "resolve_owner_type", fail)
+    with pytest.raises(PlateError) as excinfo:
+        issues_cli.run(cli.parse_args(["issues", "--owner", "nope"]))
     assert "Configured aliases:" not in str(excinfo.value)
 
 
 def test_owner_empty_default_message(monkeypatch, capsys) -> None:
     _stub_owner(monkeypatch, issues=[], total=0)
-    assert cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
+    assert issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
     assert "No open issues found for an-org." in capsys.readouterr().out
 
 
 def test_owner_empty_mine_message(monkeypatch, capsys) -> None:
     calls = _stub_owner(monkeypatch, issues=[], total=0)
-    assert cli.run(cli.parse_args(["issues", "--owner", "an-org", "--mine"])) == 0
+    assert issues_cli.run(
+        cli.parse_args(["issues", "--owner", "an-org", "--mine"])
+    ) == 0
     assert calls["mine"] is True
     assert "No open issues assigned to you for an-org." in capsys.readouterr().out
 
@@ -207,7 +213,9 @@ def test_owner_empty_mine_message(monkeypatch, capsys) -> None:
 def test_owner_truncation_note_limit_hit(monkeypatch, capsys) -> None:
     issues = [_issue(n) for n in range(1, 3)]
     _stub_owner(monkeypatch, issues=issues, total=5)
-    assert cli.run(cli.parse_args(["issues", "--owner", "an-org", "--limit", "2"])) == 0
+    assert issues_cli.run(
+        cli.parse_args(["issues", "--owner", "an-org", "--limit", "2"])
+    ) == 0
     err = capsys.readouterr().err
     assert "showing 2 of 5 open issues for an-org (--limit 2)." in err
 
@@ -215,7 +223,7 @@ def test_owner_truncation_note_limit_hit(monkeypatch, capsys) -> None:
 def test_owner_truncation_note_search_ceiling(monkeypatch, capsys) -> None:
     issues = [_issue(n) for n in range(1, 4)]
     _stub_owner(monkeypatch, issues=issues, total=1500)
-    assert cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
+    assert issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
     err = capsys.readouterr().err
     assert "at most 1000 results per query" in err
     assert "showing 3 of 1500 open issues for an-org" in err
@@ -224,13 +232,13 @@ def test_owner_truncation_note_search_ceiling(monkeypatch, capsys) -> None:
 def test_owner_no_note_when_complete(monkeypatch, capsys) -> None:
     issues = [_issue(1), _issue(2)]
     _stub_owner(monkeypatch, issues=issues, total=2)
-    assert cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
+    assert issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
     assert "Note:" not in capsys.readouterr().err
 
 
 def test_owner_markdown_format(monkeypatch, capsys) -> None:
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
-    assert cli.run(
+    assert issues_cli.run(
         cli.parse_args(["issues", "--owner", "an-org", "--format", "markdown"])
     ) == 0
     assert "## an-org/repo-a" in capsys.readouterr().out
@@ -238,7 +246,9 @@ def test_owner_markdown_format(monkeypatch, capsys) -> None:
 
 def test_owner_show_key_prints_owner_key(monkeypatch, capsys) -> None:
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
-    assert cli.run(cli.parse_args(["issues", "--owner", "an-org", "--show-key"])) == 0
+    assert issues_cli.run(
+        cli.parse_args(["issues", "--owner", "an-org", "--show-key"])
+    ) == 0
     out = capsys.readouterr().out
     assert "Key" in out
     assert "most recently active repo" in out

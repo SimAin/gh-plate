@@ -1,17 +1,33 @@
-"""Presentation: a forest of :class:`~issue_check.model.TreeNode` -> strings.
+"""Presentation: a forest of :class:`~plate.issues.model.TreeNode` -> strings.
 
 Pure rendering — takes the forest plus flags, returns a string; no I/O. Follows
 the inherited discipline: colour is rationed to *health* (the leading glyph and
 a stale Age); everything else is carried by *weight*. Hierarchy is shown by
 indentation — a node sits beneath its parent — so no breadcrumb glyph is needed.
 Un-owned context ancestors are dimmed whole. See ``spec.md`` / ``MVP.md``.
+
+Builds on :mod:`plate.core.render` for the domain-agnostic primitives (ANSI/
+width helpers, ``divider``); everything here is specific to the issue tree,
+sprint board, and owner-wide views.
 """
 
 from __future__ import annotations
 
-import re
-import shutil
 from collections.abc import Callable
+
+from plate.core.render import DIM as DIM
+from plate.core.render import SOFT_GOLD, SOFT_GREEN, SOFT_ROSE
+from plate.core.render import bold as bold
+from plate.core.render import colorize as colorize
+from plate.core.render import dim as dim
+from plate.core.render import divider as divider
+from plate.core.render import format_age as format_age
+from plate.core.render import format_cell as format_cell
+from plate.core.render import hyperlink as hyperlink
+from plate.core.render import terminal_width as terminal_width
+from plate.core.render import truncate as truncate
+from plate.core.render import visible_length as visible_length
+from plate.core.render import visible_text as visible_text
 
 from .model import (
     ACTIVE,
@@ -33,18 +49,6 @@ from .model import (
     row_class,
     strip_emoji,
 )
-
-# xterm-256 soft tints — muted hues so a coloured glyph reads as signal, not noise.
-SOFT_GREEN = "\033[38;5;151m"
-SOFT_ROSE = "\033[38;5;210m"
-SOFT_GOLD = "\033[38;5;222m"
-BOLD = "\033[1m"
-DIM = "\033[2m"
-RESET = "\033[0m"
-_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
-# OSC-8 hyperlink sequences: ESC ] 8 ; params ; URI  ST  (ST = ESC \ or BEL).
-# Stripped for width math so a linked #num still measures as its visible text.
-_OSC8_RE = re.compile(r"\033\]8;[^\033\007]*(?:\033\\|\007)")
 
 MIN_TREE_WIDTH = 30
 MAX_TREE_WIDTH = 90
@@ -97,78 +101,6 @@ PR_MD_WORDS = {
     PR_MERGED: "merged",
     PR_CLOSED: "closed",
 }
-
-
-# --- text / ANSI primitives --------------------------------------------------
-
-def visible_text(value: str) -> str:
-    return _ANSI_RE.sub("", _OSC8_RE.sub("", value))
-
-
-def visible_length(value: str) -> int:
-    return len(visible_text(value))
-
-
-def truncate(value: str, max_length: int) -> str:
-    if len(value) <= max_length:
-        return value
-    if max_length <= 1:
-        return value[:max_length]
-    return value[: max_length - 1] + "…"
-
-
-def colorize(value: str, color: str, enabled: bool) -> str:
-    if not enabled or not value:
-        return value
-    return f"{color}{value}{RESET}"
-
-
-def bold(value: str, enabled: bool) -> str:
-    return colorize(value, BOLD, enabled)
-
-
-def dim(value: str, enabled: bool) -> str:
-    return colorize(value, DIM, enabled)
-
-
-def hyperlink(text: str, url: str, enabled: bool) -> str:
-    """Wrap ``text`` in an OSC-8 terminal hyperlink to ``url``.
-
-    A no-op when disabled or there's no url, so ``--color never`` and piped
-    output stay plain. Terminals without OSC-8 support silently ignore the
-    escapes, showing the bare ``text``.
-    """
-    if not enabled or not url:
-        return text
-    return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
-
-
-def format_cell(value: str, width: int, align: str = "left") -> str:
-    """Pad (or hard-truncate) a possibly-coloured cell to ``width`` columns.
-
-    Truncation here strips ANSI as a last resort; callers that colour a cell
-    should size its visible content to ``width`` first (see ``_tree_cell``).
-    """
-    if visible_length(value) > width:
-        value = truncate(visible_text(value), width)
-    padding = " " * max(0, width - visible_length(value))
-    return padding + value if align == "right" else value + padding
-
-
-def format_age(age_days: int | None) -> str:
-    if age_days is None:
-        return ""
-    if age_days < 14:
-        return f"{age_days}d"
-    if age_days < 70:
-        return f"{age_days // 7}w"
-    if age_days < 365:
-        return f"{age_days // 30}mo"
-    return f"{age_days // 365}y"
-
-
-def escape_markdown_cell(value: str) -> str:
-    return value.replace("|", r"\|")
 
 
 def _pack_labels(labels: list[str], width: int) -> str:
@@ -252,20 +184,10 @@ def format_labels(
 
 # --- terminal tree -----------------------------------------------------------
 
-def terminal_width() -> int:
-    return shutil.get_terminal_size(fallback=(120, 24)).columns
-
-
 def _tree_width(term: int) -> int:
     fixed = AGE_W + LABELS_W + PROG_W + CMT_W
     separators = 2 * 4  # five columns, four gaps
     return max(MIN_TREE_WIDTH, min(term - fixed - separators, MAX_TREE_WIDTH))
-
-
-def _divider(label: str, width: int, use_color: bool) -> str:
-    prefix = f"── {label} "
-    fill = "─" * max(0, width - len(prefix))
-    return dim(prefix + fill, use_color)
 
 
 def _pr_marker(pr_state: str | None, use_color: bool) -> str:
@@ -320,7 +242,7 @@ def terminal_tree(
     ]
     total = sum(w for _, w, _ in columns) + 2 * (len(columns) - 1)
     header = "  ".join(format_cell(n, w, a) for n, w, a in columns)
-    lines = [bold(header, use_color), _divider("yours", total, use_color)]
+    lines = [bold(header, use_color), divider("yours", total, use_color)]
 
     for node in flatten(forest):
         row = node.row
@@ -521,14 +443,14 @@ def sprint_table(
     total = sum(w for _, w, _ in columns) + 2 * (len(columns) - 1)
     header = "  ".join(format_cell(n, w, a) for n, w, a in columns)
     title = f"{view.title}  ·  current sprint" if view.title else "current sprint"
-    lines = [bold(header, use_color), _divider(title, total, use_color)]
+    lines = [bold(header, use_color), divider(title, total, use_color)]
 
     for name, rows in (
         ("yours", view.yours),
         ("others", view.others),
         ("unassigned", view.unassigned),
     ):
-        lines.append(_divider(name, total, use_color))
+        lines.append(divider(name, total, use_color))
         for row in rows:
             lines.append(_sprint_row_line(row, columns, use_color, resolver))
 
@@ -726,7 +648,7 @@ def owner_tree(
     for repo, forest in sections:
         nodes = flatten(forest)
         open_count = sum(1 for n in nodes if not n.row.context)
-        lines.append(_divider(f"{repo} · {open_count} open", total, use_color))
+        lines.append(divider(f"{repo} · {open_count} open", total, use_color))
         for node in nodes:
             lines.append(_owner_row_line(node, columns, use_color, resolver))
 

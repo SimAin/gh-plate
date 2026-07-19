@@ -1,7 +1,10 @@
-# gh-issue-check
+# plate
 
-`issue-check` prints a compact terminal status table for the open GitHub issues
-**assigned to you** in a repository — "what's on my plate, and what's rotting?"
+`plate issues` prints a compact terminal status table for the open GitHub
+issues **assigned to you** in a repository — "what's on my plate, and what's
+rotting?" `plate` is the renamed, restructured successor to
+`gh-issue-check` (a hard switch — the `issue-check` command is gone; earlier
+versions remain installable if you need the old CLI).
 
 It follows a deliberate discipline: group by whose turn it is, one health glyph
 per row, colour rationed to health, weight encoding attention. This is the
@@ -13,7 +16,7 @@ and authenticated (`gh auth login`).
 
 ## Install
 
-This is a [uv](https://docs.astral.sh/uv/) project. To install the `issue-check`
+This is a [uv](https://docs.astral.sh/uv/) project. To install the `plate`
 executable on your PATH:
 
 ```sh
@@ -24,7 +27,7 @@ For local development (creates `.venv`, installs dev tools):
 
 ```sh
 uv sync
-uv run issue-check --help
+uv run plate issues --help
 ```
 
 ## Usage
@@ -32,19 +35,19 @@ uv run issue-check --help
 From inside any cloned GitHub repository:
 
 ```sh
-issue-check
+plate issues
 ```
 
 Or target a repo explicitly from anywhere:
 
 ```sh
-issue-check --repo OWNER/REPO
-issue-check --format markdown
-issue-check --color never
-issue-check --stale-days 30
-issue-check --show-key
-issue-check --sprint            # the repo's current sprint (see below)
-issue-check --owner my-org      # every open issue across an owner (see below)
+plate issues --repo OWNER/REPO
+plate issues --format markdown
+plate issues --color never
+plate issues --stale-days 30
+plate issues --show-key
+plate issues --sprint            # the repo's current sprint (see below)
+plate issues --owner my-org      # every open issue across an owner (see below)
 ```
 
 If run outside a git repository without `--repo`, it prints an actionable error.
@@ -97,7 +100,7 @@ The other columns carry the detail (for your own issues; blank on context rows):
 
 ## Sprint view (`--sprint`)
 
-Where the default view is *"what's on my plate?"*, `issue-check --sprint` is
+Where the default view is *"what's on my plate?"*, `plate issues --sprint` is
 *"what's in our current sprint, and who has it?"* — a **team** view of a repo's
 GitHub Projects v2 board, scoped to the **current iteration**. It groups every
 issue in the sprint into three buckets — **`yours` → `others` → `unassigned`** —
@@ -129,7 +132,7 @@ This is opt-in per repo: a repo must be mapped to a project board in config
 ### Configuring the board
 
 Add a `repos` block to your config file (same file as the special labels below;
-run `issue-check --config-path` for its location), keyed by `OWNER/REPO`:
+run `plate issues --config-path` for its location), keyed by `OWNER/REPO`:
 
 ```json
 {
@@ -156,7 +159,7 @@ file; it is intentionally **not** committed to the repo (the tool ships agnostic
 
 ## Owner-wide view (`--owner`)
 
-Where the default view is *"what's on my plate in this repo?"*, `issue-check
+Where the default view is *"what's on my plate in this repo?"*, `plate issues
 --owner` is *"what's open across everything this owner has?"* — every open issue
 across all of an organization's or user account's repositories, in one table.
 Rows are **grouped by repository**, with the **most recently active repo first**;
@@ -166,11 +169,11 @@ renders **unassigned** ones full-weight — open work you could pick up — whil
 someone else's issues are dimmed. It needs no checkout, so it runs from anywhere:
 
 ```sh
-issue-check --owner my-org         # an organization
-issue-check --owner SimAin         # a personal account
-issue-check --owner work           # a configured alias (see below)
-issue-check --owner my-org --mine  # narrow to issues assigned to you
-issue-check --owner my-org --format markdown
+plate issues --owner my-org         # an organization
+plate issues --owner SimAin         # a personal account
+plate issues --owner work           # a configured alias (see below)
+plate issues --owner my-org --mine  # narrow to issues assigned to you
+plate issues --owner my-org --format markdown
 ```
 
 The account type (org vs. user) is detected automatically. `--mine` narrows to
@@ -214,7 +217,7 @@ alias to get the literal back.
 By default the label set is shown agnostically — except `blocked`, which is
 called out in red. You can name other labels you care about and give each a
 *style* in a JSON config file (`$ISSUE_CHECK_CONFIG`, else
-`~/.config/issue-check/config.json` — run `issue-check --config-path` to see the
+`~/.config/issue-check/config.json` — run `plate issues --config-path` to see the
 exact location):
 
 ```json
@@ -241,16 +244,23 @@ uv run ruff check  # lint
 uv run mypy        # type-check (src/)
 ```
 
-The code is split by responsibility so the logic stays testable and the I/O is
-isolated:
+The package is split into `plate/core/` (shared, domain-agnostic plumbing) and
+one directory per domain — today just `plate/issues/`, with a `plate/prs/`
+planned to sit beside it (issue #53). The boundary rule is enforced by
+`tests/test_boundaries.py`: a domain package may import `plate.core`, but
+never another domain package, and `plate.core` never imports a domain package
+back (issue #50).
 
 | Module | Responsibility |
 | --- | --- |
-| `model.py` | Pure domain: raw JSON → `IssueRow` index → sorted forest (`build_index`/`build_forest`); the sprint buckets (`build_sprint_view`); health state, progress. |
-| `github.py` | The only impure module: `git`/`gh` shelling, repo + login detection, the issue + project-board GraphQL fetches (`fetch_assigned_issues`, `fetch_owner_issues`, `fetch_sprint_items`) + owner-type resolution + pagination. Failures raise `IssueCheckError`. |
-| `config.py` | The JSON config: special-label styles, the per-repo `repos` → project-board mapping, and the `owners` alias table. |
-| `render.py` | Pure presentation: ANSI/width primitives, `terminal_tree`/`markdown_tree`, `sprint_table`/`sprint_markdown`, and `owner_tree`/`owner_markdown`. |
-| `cli.py` | Argument parsing and wiring (`--sprint` selects the board view, `--owner` the owner-wide view); turns `IssueCheckError` into a clean exit. |
+| `plate/cli.py` | Top-level wiring only: builds the parser, dispatches to a subcommand, turns a `PlateError` into a clean exit. Knows nothing about issues, sprints, or owners. |
+| `plate/core/gh.py` | The only impure module: `git`/`gh` shelling (`run_command`), repo + login detection, owner-type resolution. Failures raise `PlateError`. Shared by every domain. |
+| `plate/core/render.py` | Domain-agnostic presentation primitives: ANSI/width helpers, `format_cell`, `format_age`, `hyperlink`, `divider`. |
+| `plate/core/config.py` | The JSON config: special-label styles, the per-repo `repos` → project-board mapping, and the `owners` alias table. |
+| `plate/issues/model.py` | Pure domain: raw JSON → `IssueRow` index → sorted forest (`build_index`/`build_forest`); the sprint buckets (`build_sprint_view`); health state, progress. |
+| `plate/issues/github.py` | Issue-domain GraphQL fetches (`fetch_assigned_issues`, `fetch_owner_issues`, `fetch_sprint_items`) + pagination + board-field validation, built on `plate.core.gh`. |
+| `plate/issues/render.py` | Issue-domain presentation: `terminal_tree`/`markdown_tree`, `sprint_table`/`sprint_markdown`, `owner_tree`/`owner_markdown`, built on `plate.core.render`. |
+| `plate/issues/cli.py` | The `issues` subcommand: flags, and `run()`/`_run_yours`/`_run_owner`/`_run_sprint` dispatch (`--sprint` selects the board view, `--owner` the owner-wide view). |
 
 ## Design & docs
 

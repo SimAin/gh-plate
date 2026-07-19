@@ -1,17 +1,19 @@
-"""I/O boundary: shelling out to ``git`` and ``gh``. The only impure module.
+"""Issue-domain GitHub fetches: the Issues search and Projects v2 board GraphQL.
 
-Everything here depends on the environment (a git repo, an authenticated ``gh``,
-the network), so every failure is surfaced as :class:`IssueCheckError` for the
-CLI to turn into a clean message + non-zero exit. No other module shells out.
+Builds on :mod:`plate.core.gh` for the shared ``gh``/``git`` plumbing
+(:func:`~plate.core.gh.run_command`, :class:`~plate.core.gh.PlateError`) — this
+module owns everything issue-and-sprint specific: the search queries,
+pagination, and board-field validation. No other issues-domain module shells
+out.
 """
 
 from __future__ import annotations
 
 import json
-import re
-import subprocess
 from collections.abc import Sequence
 from typing import Any
+
+from plate.core import gh
 
 from .model import normalize_status, strip_emoji
 
@@ -82,75 +84,6 @@ query($q: String!, $endCursor: String) {
 }
 """
 
-_REMOTE_PATTERNS = [
-    r"^git@github\.com:(?P<repo>[^/]+/[^/]+?)(?:\.git)?$",
-    r"^https://github\.com/(?P<repo>[^/]+/[^/]+?)(?:\.git)?/?$",
-    r"^ssh://git@github\.com/(?P<repo>[^/]+/[^/]+?)(?:\.git)?/?$",
-]
-
-
-class IssueCheckError(Exception):
-    """A user-facing failure. The CLI prints the message to stderr and exits 1."""
-
-
-def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
-    binary = args[0]
-    try:
-        return subprocess.run(args, check=False, capture_output=True, text=True)
-    except FileNotFoundError as exc:
-        if binary == "gh":
-            hint = (
-                "Install it from https://cli.github.com and run 'gh auth login'."
-            )
-        else:
-            hint = f"Install {binary} and ensure it is on PATH."
-        raise IssueCheckError(f"'{binary}' is not installed. {hint}") from exc
-
-
-def repo_from_remote(remote: str) -> str | None:
-    """Parse ``OWNER/REPO`` from a git remote URL, falling back to ``gh``."""
-    remote = remote.strip()
-    for pattern in _REMOTE_PATTERNS:
-        match = re.match(pattern, remote)
-        if match:
-            return match.group("repo")
-    # Non-github host, insteadOf rewrites, etc. — let gh resolve it.
-    result = _run(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]
-    )
-    if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip()
-    return None
-
-
-def current_repo() -> str:
-    """``OWNER/REPO`` for the git repo containing the cwd.
-
-    Raises :class:`IssueCheckError` with an actionable message when the cwd is
-    not inside a git repository with a GitHub ``origin`` remote.
-    """
-    result = _run(["git", "remote", "get-url", "origin"])
-    if result.returncode != 0:
-        raise IssueCheckError(
-            "Not inside a git repository with a GitHub 'origin' remote.\n"
-            "Run issue-check from a cloned GitHub repo, or pass --repo OWNER/REPO."
-        )
-    repo = repo_from_remote(result.stdout)
-    if repo is None:
-        raise IssueCheckError(
-            "Could not derive OWNER/REPO from the origin remote: "
-            f"{result.stdout.strip()}\nPass --repo OWNER/REPO explicitly."
-        )
-    return repo
-
-
-def current_login() -> str | None:
-    """The authenticated GitHub login, or ``None`` if it can't be determined."""
-    result = _run(["gh", "api", "user", "--jq", ".login"])
-    if result.returncode != 0:
-        return None
-    return result.stdout.strip() or None
-
 
 def _search_issues(
     query_str: str, limit: int, error_context: str
@@ -181,18 +114,18 @@ def _search_issues(
         if cursor:
             args += ["-f", f"endCursor={cursor}"]
 
-        result = _run(args)
+        result = gh.run_command(args)
         if result.returncode != 0:
-            raise IssueCheckError(
+            raise gh.PlateError(
                 f"gh failed to fetch issues for {error_context}:\n"
                 f"{result.stderr.strip()}"
             )
         try:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError as exc:
-            raise IssueCheckError(f"Could not parse gh response: {exc}") from exc
+            raise gh.PlateError(f"Could not parse gh response: {exc}") from exc
         if payload.get("errors"):
-            raise IssueCheckError("GraphQL error: " + json.dumps(payload["errors"]))
+            raise gh.PlateError("GraphQL error: " + json.dumps(payload["errors"]))
 
         search = (payload.get("data") or {}).get("search") or {}
         total = search.get("issueCount", total)
@@ -245,37 +178,6 @@ def owner_search_query(
     if mine:
         query_str += f" assignee:{login}"
     return query_str
-
-
-def resolve_owner_type(owner: str) -> str:
-    """Whether ``owner`` is a GitHub organization or a user account.
-
-    One cheap ``gh api users/{owner}`` call, mapping the account's ``.type``
-    (``"Organization"`` / ``"User"``) to the ``"organization"`` / ``"user"``
-    vocabulary the rest of the module uses (see ``config.ProjectConfig``).
-
-    This doubles as up-front validation: an owner that doesn't exist, or that
-    ``gh`` can't see, fails fast here with an actionable message, instead of
-    silently reaching :func:`fetch_owner_issues` and coming back with an
-    empty result that looks like "no open issues" rather than "no such
-    owner".
-    """
-    result = _run(["gh", "api", f"users/{owner}", "--jq", ".type"])
-    if result.returncode != 0:
-        raise IssueCheckError(
-            f"GitHub owner '{owner}' not found or not accessible.\n"
-            "Check the name (an organization or username), and that 'gh' is "
-            "authenticated."
-        )
-    account_type = result.stdout.strip()
-    if account_type == "Organization":
-        return "organization"
-    if account_type == "User":
-        return "user"
-    raise IssueCheckError(
-        f"GitHub owner '{owner}' has an unexpected account type "
-        f"'{account_type}' (expected 'Organization' or 'User')."
-    )
 
 
 def fetch_owner_issues(
@@ -394,23 +296,23 @@ def fetch_sprint_items(
         if cursor:
             args += ["-f", f"endCursor={cursor}"]
 
-        result = _run(args)
+        result = gh.run_command(args)
         if result.returncode != 0:
-            raise IssueCheckError(
+            raise gh.PlateError(
                 f"gh failed to fetch project {owner}/{number}:\n"
                 f"{result.stderr.strip()}"
             )
         try:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError as exc:
-            raise IssueCheckError(f"Could not parse gh response: {exc}") from exc
+            raise gh.PlateError(f"Could not parse gh response: {exc}") from exc
         if payload.get("errors"):
-            raise IssueCheckError("GraphQL error: " + json.dumps(payload["errors"]))
+            raise gh.PlateError("GraphQL error: " + json.dumps(payload["errors"]))
 
         root = (payload.get("data") or {}).get(root_key) or {}
         project = root.get("projectV2")
         if project is None:
-            raise IssueCheckError(
+            raise gh.PlateError(
                 f"No project #{number} found for {owner} "
                 "(check the project URL and that `gh` has read:project scope)."
             )
@@ -478,30 +380,31 @@ query {{
 def fetch_project_fields(
     owner: str, owner_type: str, number: int
 ) -> list[dict[str, Any]]:
-    """The board's fields as ``[{"name", "dataType", ...}, ...]`` (I/O; see ``_run``).
+    """The board's fields as ``[{"name", "dataType", ...}, ...]`` (I/O; see
+    :func:`~plate.core.gh.run_command`).
 
     Single-select fields additionally carry an ``"options"`` key (a list of
     ``{"name": ...}``) — the field's real values, in board order.
     """
     query_str = _fields_query(owner, owner_type, number)
     root_key = "organization" if owner_type == "organization" else "user"
-    result = _run(["gh", "api", "graphql", "-f", f"query={query_str}"])
+    result = gh.run_command(["gh", "api", "graphql", "-f", f"query={query_str}"])
     if result.returncode != 0:
-        raise IssueCheckError(
+        raise gh.PlateError(
             f"gh failed to fetch fields for project {owner}/{number}:\n"
             f"{result.stderr.strip()}"
         )
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
-        raise IssueCheckError(f"Could not parse gh response: {exc}") from exc
+        raise gh.PlateError(f"Could not parse gh response: {exc}") from exc
     if payload.get("errors"):
-        raise IssueCheckError("GraphQL error: " + json.dumps(payload["errors"]))
+        raise gh.PlateError("GraphQL error: " + json.dumps(payload["errors"]))
 
     root = (payload.get("data") or {}).get(root_key) or {}
     project = root.get("projectV2")
     if project is None:
-        raise IssueCheckError(
+        raise gh.PlateError(
             f"No project #{number} found for {owner} "
             "(check the project URL and that `gh` has read:project scope)."
         )
@@ -527,9 +430,10 @@ def _require_field(
 ) -> None:
     """Assert a configured field name matches a board field of ``data_type``.
 
-    Case-insensitive match; raises :class:`IssueCheckError` naming what was
-    configured, whether it is missing or the wrong type, and listing the board's
-    real fields of the wanted type so the user can fix config by inspection.
+    Case-insensitive match; raises :class:`~plate.core.gh.PlateError` naming
+    what was configured, whether it is missing or the wrong type, and listing
+    the board's real fields of the wanted type so the user can fix config by
+    inspection.
     """
     kind = _DATATYPE_LABELS[data_type]
     available = _names_of_type(fields, data_type)
@@ -544,13 +448,13 @@ def _require_field(
         None,
     )
     if match is None:
-        raise IssueCheckError(
+        raise gh.PlateError(
             f'Configured {config_key} "{configured}" is not a field on this '
             f"board. Its {kind} field(s): {_format_names(available)}."
         )
     if match.get("dataType") != data_type:
         actual = match.get("dataType") or "unknown"
-        raise IssueCheckError(
+        raise gh.PlateError(
             f'Configured {config_key} "{configured}" is a {actual} field, not '
             f"{kind}. This board's {kind} field(s): {_format_names(available)}."
         )
@@ -580,7 +484,7 @@ def _validate_status_order(
     """Check each configured ``statusOrder`` entry against the status field's
     real options.
 
-    Compared via :func:`issue_check.model.normalize_status` — the same
+    Compared via :func:`plate.issues.model.normalize_status` — the same
     emoji-strip + case-fold the active-first sort applies (see
     ``model.status_rank``) — so an entry written as displayed ("Priority")
     matches a board option that carries an emoji ("🚀 Priority"). The listed
@@ -592,7 +496,7 @@ def _validate_status_order(
     displayed = _format_names([strip_emoji(option) for option in options])
     for entry in status_order:
         if normalize_status(entry) not in normalized_options:
-            raise IssueCheckError(
+            raise gh.PlateError(
                 f'Configured statusOrder entry "{entry}" does not match any '
                 f'option of the "{status_field}" field. Its options: '
                 f"{displayed}."
@@ -609,8 +513,8 @@ def validate_board_fields(
 
     Pure (no I/O): the caller fetches ``fields`` via :func:`fetch_project_fields`
     and passes them in, so this is unit-tested directly. Raises the first
-    :class:`IssueCheckError` found; returns ``None`` when the config is sound.
-    ``status_order``, when given, is validated too (see
+    :class:`~plate.core.gh.PlateError` found; returns ``None`` when the config
+    is sound. ``status_order``, when given, is validated too (see
     :func:`_validate_status_order`) — a misspelled entry fails fast here
     instead of silently degrading the active-first sort at render time.
     """
@@ -620,7 +524,7 @@ def validate_board_fields(
     # qualifier), so ``sprint_filter`` would emit a token the board misparses.
     # Reject it here with an actionable message instead of a silent broken query.
     if len(sprint_field.split()) > 1:
-        raise IssueCheckError(
+        raise gh.PlateError(
             f'Configured sprintField "{sprint_field}" has spaces, and GitHub\'s '
             "board filter cannot reference a multi-word field name as a single "
             f'qualifier (it would emit "{sprint_filter(sprint_field)}", which the '

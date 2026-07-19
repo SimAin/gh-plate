@@ -1,5 +1,5 @@
 [project]
-name = "gh-issue-check"
+name = "plate"
 dynamic = ["version"]
 description = "Terminal status table for open GitHub issues assigned to you."
 readme = "README.md"
@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.scripts]
-plate = "issue_check.cli:main"
+plate = "plate.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -15,10 +15,10 @@ build-backend = "hatchling.build"
 
 # Single source of truth for the version: __version__ in the package __init__.
 [tool.hatch.version]
-path = "src/issue_check/__init__.py"
+path = "src/plate/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/issue_check"]
+packages = ["src/plate"]
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
