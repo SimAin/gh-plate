@@ -94,8 +94,8 @@ def _add_issues_flags(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--config",
-        help="Path to a JSON config file. Defaults to $ISSUE_CHECK_CONFIG or "
-        "~/.config/issue-check/config.json.",
+        help="Path to a JSON config file. Defaults to $PLATE_CONFIG or "
+        "~/.config/plate/config.json.",
     )
     parser.add_argument(
         "--config-path",

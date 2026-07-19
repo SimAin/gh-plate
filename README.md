@@ -216,9 +216,8 @@ alias to get the literal back.
 
 By default the label set is shown agnostically — except `blocked`, which is
 called out in red. You can name other labels you care about and give each a
-*style* in a JSON config file (`$ISSUE_CHECK_CONFIG`, else
-`~/.config/issue-check/config.json` — run `plate issues --config-path` to see the
-exact location):
+*style* in a JSON config file (`$PLATE_CONFIG`, else `~/.config/plate/config.json`
+— run `plate issues --config-path` to see the exact location).
 
 ```json
 {
