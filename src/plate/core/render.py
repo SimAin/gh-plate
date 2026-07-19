@@ -15,6 +15,10 @@ import shutil
 SOFT_GREEN = "\033[38;5;151m"
 SOFT_ROSE = "\033[38;5;210m"
 SOFT_GOLD = "\033[38;5;222m"
+# A soft, non-health blue — the one tint reserved for signal that isn't health
+# (e.g. the PR views' Release-PR marker). Kept in the shared palette beside its
+# siblings; where it's *used* is a domain decision, the hue itself is not.
+SOFT_BLUE = "\033[38;5;110m"
 BOLD = "\033[1m"
 DIM = "\033[2m"
 RESET = "\033[0m"
