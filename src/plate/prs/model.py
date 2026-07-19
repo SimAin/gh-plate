@@ -39,8 +39,14 @@ class PrRow:
     ``is_mine`` / ``is_to_review`` are the grouping flags (see
     :func:`row_flags`); ``original_index`` preserves the fetch order so the
     grouping sort stays stable within each group.
+
+    ``repo`` (``OWNER/REPO``) is the PR's repository. The repo view fills it
+    from the ``repo`` argument (its nodes carry no ``repository`` field); the
+    owner view reads each node's own ``repository.nameWithOwner`` — that is what
+    :func:`group_by_repo` sections on.
     """
 
+    repo: str
     number: int
     url: str
     title: str
@@ -111,6 +117,21 @@ def assignee_logins(pr: dict[str, Any]) -> list[str]:
         if isinstance(login, str) and login:
             logins.append(login)
     return logins
+
+
+def pr_repo(pr: dict[str, Any], default_repo: str) -> str:
+    """``OWNER/REPO`` for ``pr``: its own ``repository`` field, else ``default_repo``.
+
+    The owner search fetches ``repository { nameWithOwner }`` on every PR node
+    (each can live in a different repo), so that wins when present; the repo
+    view's nodes carry no such field, so they fall back to the queried repo.
+    """
+    repository = pr.get("repository")
+    if isinstance(repository, dict):
+        name = repository.get("nameWithOwner")
+        if isinstance(name, str) and name:
+            return name
+    return default_repo
 
 
 def author_login(pr: dict[str, Any]) -> str | None:
@@ -241,7 +262,16 @@ def normalize_rows(
     current_login: str | None,
     now: datetime | None = None,
     stale_days: int = DEFAULT_STALE_DAYS,
+    *,
+    repo: str = "",
 ) -> list[PrRow]:
+    """Normalize raw PR nodes into :class:`PrRow`s, preserving fetch order.
+
+    ``repo`` is the fallback ``OWNER/REPO`` for a node that carries no
+    ``repository`` field of its own (the repo view's nodes): the repo-view call
+    site passes the known repo, the owner view lets each node's own
+    ``repository.nameWithOwner`` win (see :func:`pr_repo`).
+    """
     rows: list[PrRow] = []
     for index, pr in enumerate(prs):
         assignees = assignee_logins(pr)
@@ -252,6 +282,7 @@ def normalize_rows(
         age = age_in_days(pr, now)
         rows.append(
             PrRow(
+                repo=pr_repo(pr, repo),
                 number=int(pr.get("number", 0)),
                 url=str(pr.get("url") or ""),
                 title=clean_title(pr.get("title")),
@@ -317,3 +348,21 @@ def summary_counts(rows: list[PrRow]) -> PrSummary:
         conflicts=sum(1 for row in rows if pr_state(row) == "conflict"),
         failing_ci=sum(1 for row in rows if row.check_state == "failure"),
     )
+
+
+def group_by_repo(rows: list[PrRow]) -> list[tuple[str, list[PrRow]]]:
+    """Partition ``rows`` by repository for the owner-wide view.
+
+    Repos appear most-recently-active first, and rows within a repo keep fetch
+    order — both fall out of preserving ``rows``' order. The owner fetch is
+    ``sort:updated-desc``, so a repo's first-seen row is its most recently
+    active, and first-appearance order across repos is therefore activity order;
+    Python dicts preserve insertion order, so grouping without re-sorting keeps
+    exactly that. Unlike the issues ``group_by_repo`` (which rebuilds a forest
+    per repo and sorts by subtree age), the PR view is a flat list, so ordering
+    is entirely carried by the server's sort.
+    """
+    grouped: dict[str, list[PrRow]] = {}
+    for row in rows:
+        grouped.setdefault(row.repo, []).append(row)
+    return list(grouped.items())

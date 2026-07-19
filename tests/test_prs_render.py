@@ -398,3 +398,97 @@ def test_markdown_escapes_pipes_in_cells() -> None:
 def test_markdown_has_no_ansi() -> None:
     rows = rows_for(pr(1, "Mine", ["simon"], review_decision="APPROVED"))
     assert "\033[" not in render.markdown_table(rows)
+
+
+# --- owner-wide view ----------------------------------------------------------
+
+
+def _in_repo(node: dict[str, object], repo: str) -> dict[str, object]:
+    """An owner-search node: the PR payload plus its own repository field."""
+    return {**node, "repository": {"nameWithOwner": repo}}
+
+
+def owner_sections() -> list[tuple[str, list[model.PrRow]]]:
+    # repo-b (most recently active, listed first): one mine + one to-review;
+    # repo-a: a single settled row (neither mine nor to-review -> dimmed).
+    rows = model.normalize_rows(
+        [
+            _in_repo(pr(1, "Mine here", ["simon"]), "acme/repo-b"),
+            _in_repo(pr(2, "Review me", ["alice"]), "acme/repo-b"),
+            _in_repo(
+                pr(3, "Settled elsewhere", ["bob"], review_decision="APPROVED"),
+                "acme/repo-a",
+            ),
+        ],
+        "simon",
+    )
+    return model.group_by_repo(rows)
+
+
+def test_owner_table_sections_in_order_with_open_counts() -> None:
+    out = render.owner_table(owner_sections(), use_color=False)
+    assert out.index("acme/repo-b") < out.index("acme/repo-a")  # order kept
+    # divider carries OWNER/REPO plus the section's open count
+    assert "── acme/repo-b · 2 open" in out
+    assert "── acme/repo-a · 1 open" in out
+
+
+def test_owner_table_has_no_group_subdividers() -> None:
+    # The repo divider is the grouping here — no yours/to-review/the-rest.
+    out = render.owner_table(owner_sections(), use_color=False)
+    assert "── yours" not in out
+    assert "── to review" not in out
+    assert "── the rest" not in out
+
+
+def test_owner_table_dims_rows_neither_mine_nor_to_review() -> None:
+    out = render.owner_table(owner_sections(), use_color=True)
+    settled_line = next(line for line in out.splitlines() if "Settled" in line)
+    assert settled_line.startswith(DIM)  # whole line dimmed
+    assert SOFT_GREEN not in settled_line  # no health colour competes
+
+
+def test_owner_table_keeps_mine_and_to_review_full_weight() -> None:
+    out = render.owner_table(owner_sections(), use_color=True)
+    mine_line = next(line for line in out.splitlines() if "Mine here" in line)
+    review_line = next(line for line in out.splitlines() if "Review me" in line)
+    assert not mine_line.startswith(DIM)
+    assert not review_line.startswith(DIM)
+    # Health glyphs keep their colours on full-weight rows.
+    assert f"{SOFT_GOLD}•{RESET}" in mine_line
+
+
+def test_owner_table_rows_keep_section_fetch_order() -> None:
+    lines = render.owner_table(owner_sections(), use_color=False).splitlines()
+    assert (
+        next(i for i, line in enumerate(lines) if "Mine here" in line)
+        < next(i for i, line in enumerate(lines) if "Review me" in line)
+    )
+
+
+def test_owner_table_color_can_be_disabled() -> None:
+    assert "\033[" not in render.owner_table(owner_sections(), use_color=False)
+
+
+def test_owner_markdown_headings_per_repo_with_tables() -> None:
+    out = render.owner_markdown(owner_sections())
+    assert "## acme/repo-b" in out
+    assert "## acme/repo-a" in out
+    assert out.index("## acme/repo-b") < out.index("## acme/repo-a")
+    # each section reuses the repo view's markdown table
+    assert out.count("| PR ID | Title |") == 2
+    assert "\033[" not in out
+
+
+def test_owner_key_teaches_repo_grouping_and_dimming() -> None:
+    key = render.owner_key(use_color=True)
+    assert "Key" in key
+    assert "grouped by repository" in key
+    assert "neither yours nor to review" in key
+    for label in render.STATE_LABELS.values():
+        assert label in key
+    assert f"{SOFT_GREEN}✓{RESET}" in key
+
+
+def test_owner_key_plain_when_color_disabled() -> None:
+    assert "\033[" not in render.owner_key(use_color=False)

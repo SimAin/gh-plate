@@ -301,3 +301,69 @@ def test_summary_counts_zeroes_when_nothing_pending() -> None:
 def test_comment_count_is_the_badge_figure() -> None:
     rows = model.normalize_rows([pr(1, "Mine", ["simon"], comments=9)], "simon")
     assert rows[0].comments_count == 9
+
+
+# --- repo field (owner view) --------------------------------------------------
+
+
+def _with_repo(node: dict[str, object], repo: str) -> dict[str, object]:
+    """An owner-search node: the PR payload plus its own repository field."""
+    return {**node, "repository": {"nameWithOwner": repo}}
+
+
+def test_repo_read_from_nodes_own_repository_field() -> None:
+    rows = model.normalize_rows(
+        [_with_repo(pr(1, "Owner-search node"), "acme/widget")], "simon"
+    )
+    assert rows[0].repo == "acme/widget"
+
+
+def test_repo_falls_back_to_the_queried_repo() -> None:
+    # Repo-view nodes carry no repository field; the call site passes the repo.
+    rows = model.normalize_rows([pr(1, "Repo-view node")], "simon", repo="acme/widget")
+    assert rows[0].repo == "acme/widget"
+
+
+def test_nodes_own_repository_wins_over_fallback() -> None:
+    rows = model.normalize_rows(
+        [_with_repo(pr(1, "x"), "acme/other")], "simon", repo="acme/widget"
+    )
+    assert rows[0].repo == "acme/other"
+
+
+# --- group_by_repo ------------------------------------------------------------
+
+
+def test_group_by_repo_sections_in_first_appearance_order() -> None:
+    # Fetch order is sort:updated-desc, so first appearance = most recently
+    # active; the grouping must preserve exactly that order across repos.
+    rows = model.normalize_rows(
+        [
+            _with_repo(pr(5, "freshest"), "acme/repo-b"),
+            _with_repo(pr(3, "older"), "acme/repo-a"),
+            _with_repo(pr(4, "old too"), "acme/repo-b"),
+            _with_repo(pr(1, "oldest"), "acme/repo-c"),
+        ],
+        "simon",
+    )
+    sections = model.group_by_repo(rows)
+    assert [repo for repo, _ in sections] == [
+        "acme/repo-b", "acme/repo-a", "acme/repo-c"
+    ]
+
+
+def test_group_by_repo_rows_keep_fetch_order_within_a_repo() -> None:
+    rows = model.normalize_rows(
+        [
+            _with_repo(pr(5, "first fetched"), "acme/repo-b"),
+            _with_repo(pr(3, "elsewhere"), "acme/repo-a"),
+            _with_repo(pr(9, "second fetched"), "acme/repo-b"),
+        ],
+        "simon",
+    )
+    sections = dict(model.group_by_repo(rows))
+    assert [row.number for row in sections["acme/repo-b"]] == [5, 9]
+
+
+def test_group_by_repo_empty_rows_yield_no_sections() -> None:
+    assert model.group_by_repo([]) == []

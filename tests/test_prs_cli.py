@@ -94,9 +94,11 @@ def test_stale_days_zero_is_rejected(capsys) -> None:
     assert "positive integer" in capsys.readouterr().err
 
 
-def test_no_owner_flag() -> None:
-    with pytest.raises(SystemExit):
-        cli.parse_args(["prs", "--owner", "an-org"])
+def test_owner_and_repo_are_mutually_exclusive(capsys) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        cli.parse_args(["prs", "--owner", "an-org", "--repo", "an-org/a-repo"])
+    assert excinfo.value.code == 2
+    assert "not allowed with" in capsys.readouterr().err
 
 
 # --- run() ---------------------------------------------------------------
@@ -216,3 +218,233 @@ def test_gh_failure_surfaces_as_plate_error(monkeypatch) -> None:
 
     monkeypatch.setattr(github, "fetch_prs_and_viewer", fake_fetch)
     assert cli.main(["prs", "--repo", "acme/widget"]) == 1
+
+
+# --- owner view (--owner) ------------------------------------------------------
+
+
+def _owner_pr(
+    number: int,
+    title: str = "A change",
+    *,
+    repo: str = "an-org/repo-a",
+    author: str | None = "someone",
+    assignees: list[str] | None = None,
+    review_decision: str | None = None,
+) -> dict[str, Any]:
+    """A minimal owner-search PR payload (carries its own repository)."""
+    return {
+        **_pr(
+            number,
+            title,
+            author=author,
+            assignees=assignees,
+            review_decision=review_decision,
+        ),
+        "repository": {"nameWithOwner": repo},
+    }
+
+
+def _boom_current_repo() -> str:
+    raise AssertionError("current_repo() must not be called on the --owner path")
+
+
+def _stub_owner(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    prs: list[dict[str, Any]],
+    total: int,
+    cfg: Any = None,
+    owner_type: str = "organization",
+    login: str = "me",
+) -> dict[str, Any]:
+    """Wire the owner path's I/O to in-memory stubs; record fetch arguments."""
+    from plate.core import config, gh
+
+    calls: dict[str, Any] = {}
+    monkeypatch.setattr(
+        config, "load_config", lambda *a, **k: cfg or config.Config()
+    )
+    monkeypatch.setattr(gh, "current_login", lambda: login)
+    monkeypatch.setattr(gh, "current_repo", _boom_current_repo)
+    monkeypatch.setattr(gh, "resolve_owner_type", lambda owner: owner_type)
+
+    def fake_fetch(
+        owner: str, otype: str, lg: str, limit: int, *, mine: bool
+    ) -> tuple[list[dict[str, Any]], int]:
+        calls.update(owner=owner, owner_type=otype, login=lg, limit=limit, mine=mine)
+        return prs, total
+
+    monkeypatch.setattr(github, "fetch_owner_prs", fake_fetch)
+    return calls
+
+
+def test_mine_without_owner_errors() -> None:
+    with pytest.raises(PlateError) as excinfo:
+        prs_cli.run(cli.parse_args(["prs", "--mine"]))
+    assert "--mine only applies with --owner" in str(excinfo.value)
+
+
+def test_owner_flow_never_calls_current_repo(monkeypatch, capsys) -> None:
+    _stub_owner(monkeypatch, prs=[_owner_pr(1)], total=1)
+    # _boom_current_repo would raise if the owner path touched it.
+    assert prs_cli.run(cli.parse_args(["prs", "--owner", "an-org"])) == 0
+    assert "repo-a" in capsys.readouterr().out
+
+
+def test_owner_groups_output_by_repo(monkeypatch, capsys) -> None:
+    prs = [
+        _owner_pr(1, "Fresh one", repo="an-org/repo-b"),
+        _owner_pr(2, "Old one", repo="an-org/repo-a"),
+    ]
+    _stub_owner(monkeypatch, prs=prs, total=2)
+    assert prs_cli.run(
+        cli.parse_args(["prs", "--owner", "an-org", "--color", "never"])
+    ) == 0
+    out = capsys.readouterr().out
+    assert "── an-org/repo-b · 1 open" in out
+    assert "── an-org/repo-a · 1 open" in out
+    assert out.index("repo-b") < out.index("repo-a")  # fetch order kept
+
+
+def test_owner_alias_resolves_and_shows_arrow(monkeypatch, capsys) -> None:
+    from plate.core import config
+
+    cfg = config.Config(owners={"work": "company-org"})
+    calls = _stub_owner(monkeypatch, prs=[_owner_pr(1)], total=1, cfg=cfg)
+    assert prs_cli.run(cli.parse_args(["prs", "--owner", "work"])) == 0
+    assert calls["owner"] == "company-org"  # fetch got the resolved name
+    assert "work → company-org" in capsys.readouterr().out
+
+
+def test_owner_literal_shows_no_arrow(monkeypatch, capsys) -> None:
+    calls = _stub_owner(monkeypatch, prs=[_owner_pr(1)], total=1)
+    assert prs_cli.run(cli.parse_args(["prs", "--owner", "an-org"])) == 0
+    assert calls["owner"] == "an-org"
+    assert "→" not in capsys.readouterr().out
+
+
+def test_owner_mine_flag_reaches_the_fetch(monkeypatch, capsys) -> None:
+    calls = _stub_owner(monkeypatch, prs=[_owner_pr(1)], total=1)
+    assert prs_cli.run(
+        cli.parse_args(["prs", "--owner", "an-org", "--mine"])
+    ) == 0
+    assert calls["mine"] is True
+
+
+def test_owner_type_failure_lists_aliases(monkeypatch, capsys) -> None:
+    from plate.core import config, gh
+
+    cfg = config.Config(owners={"work": "company-org", "personal": "my-org"})
+    _stub_owner(monkeypatch, prs=[], total=0, cfg=cfg)
+
+    def fail(owner: str) -> str:
+        raise PlateError(f"GitHub owner '{owner}' not found or not accessible.")
+
+    monkeypatch.setattr(gh, "resolve_owner_type", fail)
+    with pytest.raises(PlateError) as excinfo:
+        prs_cli.run(cli.parse_args(["prs", "--owner", "typo"]))
+    message = str(excinfo.value)
+    assert "Configured aliases:" in message
+    assert "work → company-org" in message
+    assert "personal → my-org" in message
+
+
+def test_owner_type_failure_without_aliases_has_no_alias_line(monkeypatch) -> None:
+    from plate.core import gh
+
+    _stub_owner(monkeypatch, prs=[], total=0)
+
+    def fail(owner: str) -> str:
+        raise PlateError(f"GitHub owner '{owner}' not found or not accessible.")
+
+    monkeypatch.setattr(gh, "resolve_owner_type", fail)
+    with pytest.raises(PlateError) as excinfo:
+        prs_cli.run(cli.parse_args(["prs", "--owner", "nope"]))
+    assert "Configured aliases:" not in str(excinfo.value)
+
+
+def test_owner_missing_login_errors(monkeypatch) -> None:
+    from plate.core import config, gh
+
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: config.Config())
+    monkeypatch.setattr(gh, "current_login", lambda: None)
+    with pytest.raises(PlateError) as excinfo:
+        prs_cli.run(cli.parse_args(["prs", "--owner", "an-org"]))
+    assert "GitHub login" in str(excinfo.value)
+
+
+def test_owner_empty_default_message(monkeypatch, capsys) -> None:
+    _stub_owner(monkeypatch, prs=[], total=0)
+    assert prs_cli.run(cli.parse_args(["prs", "--owner", "an-org"])) == 0
+    assert "No open PRs found for an-org." in capsys.readouterr().out
+
+
+def test_owner_empty_mine_message(monkeypatch, capsys) -> None:
+    calls = _stub_owner(monkeypatch, prs=[], total=0)
+    assert prs_cli.run(
+        cli.parse_args(["prs", "--owner", "an-org", "--mine"])
+    ) == 0
+    assert calls["mine"] is True
+    assert "No open PRs authored by you for an-org." in capsys.readouterr().out
+
+
+def test_owner_truncation_note_limit_hit(monkeypatch, capsys) -> None:
+    prs = [_owner_pr(n) for n in range(1, 3)]
+    _stub_owner(monkeypatch, prs=prs, total=5)
+    assert prs_cli.run(
+        cli.parse_args(["prs", "--owner", "an-org", "--limit", "2"])
+    ) == 0
+    err = capsys.readouterr().err
+    assert "showing 2 of 5 open PRs for an-org (--limit 2)." in err
+
+
+def test_owner_truncation_note_search_ceiling(monkeypatch, capsys) -> None:
+    prs = [_owner_pr(n) for n in range(1, 4)]
+    _stub_owner(monkeypatch, prs=prs, total=1500)
+    assert prs_cli.run(cli.parse_args(["prs", "--owner", "an-org"])) == 0
+    err = capsys.readouterr().err
+    assert "at most 1000 results per query" in err
+    assert "showing 3 of 1500 open PRs for an-org" in err
+    assert "Use --mine or --repo to narrow." in err
+
+
+def test_owner_no_note_when_complete(monkeypatch, capsys) -> None:
+    prs = [_owner_pr(n) for n in range(1, 3)]
+    _stub_owner(monkeypatch, prs=prs, total=2)
+    assert prs_cli.run(cli.parse_args(["prs", "--owner", "an-org"])) == 0
+    assert "Note:" not in capsys.readouterr().err
+
+
+def test_owner_markdown_format(monkeypatch, capsys) -> None:
+    _stub_owner(monkeypatch, prs=[_owner_pr(1)], total=1)
+    assert prs_cli.run(
+        cli.parse_args(["prs", "--owner", "an-org", "--format", "markdown"])
+    ) == 0
+    out = capsys.readouterr().out
+    assert "## an-org/repo-a" in out
+    assert "| PR ID | Title |" in out
+
+
+def test_owner_show_key_prints_owner_key(monkeypatch, capsys) -> None:
+    _stub_owner(monkeypatch, prs=[_owner_pr(1)], total=1)
+    assert prs_cli.run(
+        cli.parse_args(["prs", "--owner", "an-org", "--show-key", "--color", "never"])
+    ) == 0
+    out = capsys.readouterr().out
+    assert "Key" in out
+    assert "grouped by repository" in out
+
+
+def test_owner_summary_line_present(monkeypatch, capsys) -> None:
+    prs = [
+        _owner_pr(1, "Mine", author="me"),
+        _owner_pr(2, "Review this", author="alice"),
+    ]
+    _stub_owner(monkeypatch, prs=prs, total=2)
+    assert prs_cli.run(
+        cli.parse_args(["prs", "--owner", "an-org", "--color", "never"])
+    ) == 0
+    out = capsys.readouterr().out
+    assert "2 open" in out
+    assert "1 to review" in out

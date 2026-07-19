@@ -11,8 +11,10 @@ across domains to live here once. No other module shells out.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
+from typing import Any
 
 _REMOTE_PATTERNS = [
     r"^git@github\.com:(?P<repo>[^/]+/[^/]+?)(?:\.git)?$",
@@ -113,3 +115,62 @@ def resolve_owner_type(owner: str) -> str:
         f"GitHub owner '{owner}' has an unexpected account type "
         f"'{account_type}' (expected 'Organization' or 'User')."
     )
+
+
+def search_paginated(
+    query: str, query_str: str, limit: int, error_context: str
+) -> tuple[list[dict[str, Any]], int]:
+    """Run a GraphQL ``search`` document against ``query_str``, paginating.
+
+    The shared engine behind every owner/repo-scoped GitHub search across
+    domains: the issue owner/assigned views and the PR owner view are all the
+    same top-level ``search(type: ISSUE, first: 100, after: $endCursor)``
+    connection under a caller-supplied GraphQL document (``query``), differing
+    only in the node fields each requests and the qualifiers built into
+    ``query_str``. Keeping the cursor loop here — rather than once per domain —
+    is the D8-legitimate infra move: no view behaviour depends on it.
+
+    ``error_context`` is interpolated into the failure message (a repo or an
+    owner name) so each caller's error stays specific to what it was fetching.
+
+    Returns ``(nodes, total)`` where ``total`` is the server's own
+    ``issueCount`` (used only for the truncation note). GitHub caps any single
+    search at 1000 results, so for a large owner ``total`` can exceed what
+    pagination ever delivers — it is not only the true count clipped by
+    ``limit``.
+    """
+    nodes: list[dict[str, Any]] = []
+    total = 0
+    cursor: str | None = None
+
+    while True:
+        args = [
+            "gh", "api", "graphql",
+            "-f", f"query={query}",
+            "-f", f"q={query_str}",
+        ]
+        if cursor:
+            args += ["-f", f"endCursor={cursor}"]
+
+        result = run_command(args)
+        if result.returncode != 0:
+            raise PlateError(
+                f"gh search failed for {error_context}:\n{result.stderr.strip()}"
+            )
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise PlateError(f"Could not parse gh response: {exc}") from exc
+        if payload.get("errors"):
+            raise PlateError("GraphQL error: " + json.dumps(payload["errors"]))
+
+        search = (payload.get("data") or {}).get("search") or {}
+        total = search.get("issueCount", total)
+        nodes.extend(node for node in (search.get("nodes") or []) if node)
+
+        if len(nodes) >= limit:
+            return nodes[:limit], total
+        page = search.get("pageInfo") or {}
+        cursor = page.get("endCursor")
+        if not page.get("hasNextPage") or not cursor:
+            return nodes, total

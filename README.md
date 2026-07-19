@@ -116,6 +116,7 @@ plate prs --format markdown
 plate prs --color never
 plate prs --stale-days 7
 plate prs --show-key
+plate prs --owner my-org      # every open PR across an owner (see below)
 ```
 
 If run outside a git repository without `--repo`, it prints an actionable error.
@@ -158,6 +159,36 @@ Settled PRs in "the rest" are dimmed so your attention lands on what's live.
 In terminals that support OSC 8 hyperlinks (iTerm2, Kitty, WezTerm, VS Code,
 and most modern emulators), the PR number is clickable and opens the PR on
 GitHub. Piped or redirected output stays plain.
+
+### Owner-wide PRs (`plate prs --owner`)
+
+Like the issues owner view below, `plate prs --owner` answers *"what PRs are
+open across everything this owner has?"* — every open pull request across all
+of an organization's or user account's repositories, **grouped by repository**
+with the **most recently active repo first**. Within each repo, rows keep the
+same columns and health glyphs as the repo view; the per-repo divider replaces
+the yours/to-review/the-rest grouping, and a PR that is neither yours nor
+waiting on your review is dimmed. It needs no checkout, so it runs from
+anywhere:
+
+```sh
+plate prs --owner my-org         # an organization
+plate prs --owner SimAin         # a personal account
+plate prs --owner work           # a configured alias (see below)
+plate prs --owner my-org --mine  # narrow to PRs you authored
+plate prs --owner my-org --format markdown
+```
+
+The account type (org vs. user) is detected automatically, and the same
+[owner aliases](#owner-aliases-configuration) apply (`work → company-org` is
+echoed when an alias fires). `--mine` narrows to PRs **you authored** — note
+this is narrower than the repo view's "yours" group (author *or* assignee);
+see `DECISIONS.md` D9 for why. It is only meaningful with `--owner`.
+
+The same honesty notes as the issues owner view apply: archived repos are
+excluded, results are sorted most-recently-active first, and a truncation note
+reports `showing N of M` whenever `--limit` or GitHub's 1000-results-per-search
+cap clipped the table.
 
 ## Sprint view (`--sprint`)
 
@@ -320,10 +351,10 @@ never imports a domain package back (issue #50).
 | `plate/issues/github.py` | Issue-domain GraphQL fetches (`fetch_assigned_issues`, `fetch_owner_issues`, `fetch_sprint_items`) + pagination + board-field validation, built on `plate.core.gh`. |
 | `plate/issues/render.py` | Issue-domain presentation: `terminal_tree`/`markdown_tree`, `sprint_table`/`sprint_markdown`, `owner_tree`/`owner_markdown`, built on `plate.core.render`. |
 | `plate/issues/cli.py` | The `issues` subcommand: flags, and `run()`/`_run_yours`/`_run_owner`/`_run_sprint` dispatch (`--sprint` selects the board view, `--owner` the owner-wide view). |
-| `plate/prs/model.py` | Pure domain: raw GraphQL PR nodes → `PrRow`s (`normalize_rows`), the yours/to-review/the-rest grouping (`sort_key`), and the summary counts (`summary_counts`). |
-| `plate/prs/github.py` | PR-domain GraphQL fetch (`fetch_prs_and_viewer`) + `gh api graphql --paginate` pagination, built on `plate.core.gh`. |
-| `plate/prs/render.py` | PR-domain presentation: `terminal_table`/`markdown_table`, `summary_line`, `symbol_key`, built on `plate.core.render`. |
-| `plate/prs/cli.py` | The `prs` subcommand: flags, and `run()` — fetch, normalize, and render the open PRs for the current or named repo. |
+| `plate/prs/model.py` | Pure domain: raw GraphQL PR nodes → `PrRow`s (`normalize_rows`), the yours/to-review/the-rest grouping (`sort_key`), the summary counts (`summary_counts`), and the owner view's per-repo sections (`group_by_repo`). |
+| `plate/prs/github.py` | PR-domain GraphQL fetches (`fetch_prs_and_viewer`, `fetch_owner_prs`) + `gh api graphql --paginate` pagination, built on `plate.core.gh`. |
+| `plate/prs/render.py` | PR-domain presentation: `terminal_table`/`markdown_table`, `owner_table`/`owner_markdown`, `summary_line`, `symbol_key`/`owner_key`, built on `plate.core.render`. |
+| `plate/prs/cli.py` | The `prs` subcommand: flags, and `run()`/`_run_repo`/`_run_owner` dispatch (`--owner` selects the owner-wide view). |
 
 ## Design & docs
 

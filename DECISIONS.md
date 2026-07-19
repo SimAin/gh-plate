@@ -211,6 +211,42 @@ it is no longer issue-specific — every domain's failures surface through it.
 
 ---
 
+## D9 — Owner-wide PR view: `--mine` means `author:LOGIN` (issue #54)
+
+**Decision:** `plate prs --owner OWNER` lists every open PR across an owner's
+repositories (mirroring D7's issues view: one owner-scoped search, per-repo
+sections most-recently-active first, `archived:false sort:updated-desc`, the
+1000-cap and `--limit` truncation notes). Its `--mine` flag narrows with the
+single search qualifier **`author:LOGIN`** — "PRs you authored", not
+"PRs you're involved in" and not the repo view's author-or-assignee "mine".
+
+**Why `author:`:** PRs are authored artifacts — unlike issues (where work is
+*assigned*, so D7's `--mine` is `assignee:LOGIN`), a PR's primary owner is the
+person who opened it, so "my PRs across an owner" most naturally means
+authored-by-me. The alternatives both lose:
+
+- **`involves:LOGIN`** is too broad — it also matches PRs you merely commented
+  on or were mentioned in, which is "PRs I've touched", not "my PRs".
+- **The repo view's author-or-assignee "mine"** can't be expressed as a single
+  search qualifier: GitHub search qualifiers AND together, so
+  `author:X assignee:X` means *both*, and expressing the OR would take two
+  separate searches merged client-side — double the request cost (and two
+  1000-result ceilings to reconcile) for a rare need.
+
+**Consequence:** The repo view's yours-grouping keeps its author-or-assignee
+definition — the two answer different questions ("which of these rows is mine
+to move?" vs. "fetch only mine, owner-wide"), so the asymmetry is deliberate.
+The search pagination loop moved from `plate/issues/github.py` into
+`plate/core/gh.py` as `search_paginated` (D8-legitimate: shared infra, not a
+view change); the PR domain gets its own `PR_OWNER_QUERY` /
+`owner_search_query` / `fetch_owner_prs` as parallel code, never importing
+from `plate.issues`. The viewer's login comes from `gh.current_login()` at the
+CLI layer (a top-level `search` query has no `viewer` root worth coupling to),
+and `PrRow` gains a `repo` field read from each node's
+`repository.nameWithOwner` so `group_by_repo` can section the flat list.
+
+---
+
 ## Standing decisions carried from the architecture discussion
 
 - **Standalone, not a shared package.** The GraphQL fetch layer is specific enough

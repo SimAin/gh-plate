@@ -58,6 +58,99 @@ query($owner: String!, $name: String!, $pageSize: Int!, $endCursor: String) {
 """
 
 
+# The owner-wide view (issue #54) is a single owner-scoped search rather than a
+# per-repo enumeration — GitHub's ``search(type: ISSUE)`` returns PRs too, so a
+# ``is:pr`` search across ``org:``/``user:`` fetches every open PR an owner has
+# in one paginated query. The ``... on PullRequest`` node carries exactly the
+# fields the repo view's normaliser reads (so ``model.normalize_rows`` consumes
+# both shapes unchanged), plus ``repository { nameWithOwner }`` — every node in
+# an owner search can live in a different repo, and that field is what
+# ``group_by_repo`` sections on. The viewer's login is *not* fetched here (a
+# search has no ``viewer`` root); the CLI passes it from ``gh.current_login()``,
+# mirroring the issues owner path.
+PR_OWNER_QUERY = """
+fragment PrFields on PullRequest {
+  number
+  title
+  url
+  isDraft
+  updatedAt
+  mergeable
+  totalCommentsCount
+  reviewDecision
+  author { login __typename }
+  assignees(first: 20) { nodes { login } }
+  latestReviews: latestOpinionatedReviews(first: 30) {
+    nodes { state author { login } }
+  }
+  reviewRequests(first: 30) {
+    nodes { requestedReviewer { ... on User { login } } }
+  }
+  commits(last: 1) {
+    nodes { commit { statusCheckRollup { state } } }
+  }
+  repository { nameWithOwner }
+}
+query($q: String!, $endCursor: String) {
+  search(query: $q, type: ISSUE, first: 100, after: $endCursor) {
+    issueCount
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      ... on PullRequest {
+        ...PrFields
+      }
+    }
+  }
+}
+"""
+
+
+def owner_search_query(
+    owner: str, owner_type: str, login: str, *, mine: bool
+) -> str:
+    """The GitHub search string for every open PR across ``owner``.
+
+    ``owner_type`` (``"organization"`` or ``"user"`` — the same vocabulary as
+    ``config.ProjectConfig.owner_type``) picks the qualifier: an organization is
+    searched with ``org:OWNER``, a user account with ``user:OWNER``. ``is:pr``
+    scopes the shared ``search(type: ISSUE)`` connection to pull requests.
+
+    When ``mine`` is set, ``author:LOGIN`` narrows to PRs *you authored* — see
+    DECISIONS.md D9. This differs deliberately from the repo view's
+    author-or-assignee "mine": qualifiers AND together, so author-or-assignee
+    cannot be expressed as a single search term, and "my PRs across an owner"
+    most naturally means the ones you opened.
+
+    ``archived:false`` excludes archived repos by design (a done repo's PRs are
+    not live work); ``sort:updated-desc`` makes the result deterministic and,
+    under truncation, drops the *least* recently active PRs first — the
+    active-first ethos everywhere else (D1, D6).
+    """
+    qualifier = "org" if owner_type == "organization" else "user"
+    query_str = (
+        f"{qualifier}:{owner} is:pr is:open archived:false sort:updated-desc"
+    )
+    if mine:
+        query_str += f" author:{login}"
+    return query_str
+
+
+def fetch_owner_prs(
+    owner: str, owner_type: str, login: str, limit: int, *, mine: bool
+) -> tuple[list[dict[str, Any]], int]:
+    """Open PRs across every repo ``owner`` has, paginating as needed.
+
+    Builds the search string via :func:`owner_search_query` and delegates to
+    :func:`plate.core.gh.search_paginated` (the shared cursor loop) bound to
+    :data:`PR_OWNER_QUERY`. Returns ``(prs, total)`` where ``total`` is the
+    server's own count; GitHub caps any search at 1000 results, so for a large
+    owner ``total`` can exceed what pagination retrieves — the CLI compares
+    ``len(prs) < total`` to report a partial result honestly.
+    """
+    query_str = owner_search_query(owner, owner_type, login, mine=mine)
+    return gh.search_paginated(PR_OWNER_QUERY, query_str, limit, owner)
+
+
 def parse_graphql_documents(text: str) -> list[dict[str, Any]]:
     """Split `gh api graphql --paginate` output into its JSON documents.
 
