@@ -98,6 +98,67 @@ The other columns carry the detail (for your own issues; blank on context rows):
 
 `--format markdown` renders the same tree as a nested list.
 
+## PR view (`plate prs`)
+
+`plate prs` prints a compact terminal status table for the **open pull
+requests** in a repository — "what's waiting on review, and what's mine?" It
+is the renamed, restructured successor to `gh-pr-status` (`pr-check`).
+
+```sh
+plate prs
+```
+
+Or target a repo explicitly from anywhere:
+
+```sh
+plate prs --repo OWNER/REPO
+plate prs --format markdown
+plate prs --color never
+plate prs --stale-days 7
+plate prs --show-key
+```
+
+If run outside a git repository without `--repo`, it prints an actionable error.
+
+### How to read the table
+
+A one-line summary sits above the table (e.g. `12 open · 3 to review ·
+1 with conflicts`); zero counts are suppressed. Rows are grouped by whose
+turn it is — **yours**, **to review**, then **the rest** — under a labelled
+divider that carries the group's count. Colour is reserved for one thing
+only: a PR's health. The leading glyph is the headline state, resolved in
+priority order:
+
+| Glyph | State | Meaning |
+| --- | --- | --- |
+| `⚠` | conflict | has merge conflicts |
+| `•` | waiting | not ready yet — needs review, CI, or fixes |
+| `✓` | ready | approved with CI green |
+| `?` | unconfirmed | approved with CI green, but GitHub hasn't confirmed it's conflict-free yet |
+| `◦` | draft | still a draft |
+
+Failing CI and requested changes are not headline states — they already show
+in the CI (`✗`) and Review (`changes req`) columns, so the leading glyph stays
+reserved for what those columns don't cover.
+
+The remaining columns carry the detail:
+
+- **Age** — time since last update (e.g. `3d`, `4w`), shown rose once it passes
+  `--stale-days` (14 by default).
+- **Review** — `approved`, `changes req`, `pending`, or `you ✓` when you have
+  reviewed someone else's PR.
+- **CI** — the status-check rollup as ✓ / ✗ / •.
+- **Assignee** — other engineers' logins at full weight (who you might chase);
+  `me`, bot authors (`dependabot`, `renovate`, `github-actions`, …), and
+  unassigned (blank) dimmed back; an open `Release PR` flagged with a soft
+  non-health tint.
+
+Settled PRs in "the rest" are dimmed so your attention lands on what's live.
+
+In terminals that support OSC 8 hyperlinks (iTerm2, Kitty, WezTerm, VS Code,
+and most modern emulators), the PR number is clickable and opens the PR on
+GitHub. Piped or redirected output stays plain.
+
 ## Sprint view (`--sprint`)
 
 Where the default view is *"what's on my plate?"*, `plate issues --sprint` is
@@ -244,15 +305,14 @@ uv run mypy        # type-check (src/)
 ```
 
 The package is split into `plate/core/` (shared, domain-agnostic plumbing) and
-one directory per domain — today just `plate/issues/`, with a `plate/prs/`
-planned to sit beside it (issue #53). The boundary rule is enforced by
-`tests/test_boundaries.py`: a domain package may import `plate.core`, but
-never another domain package, and `plate.core` never imports a domain package
-back (issue #50).
+one directory per domain — `plate/issues/` and `plate/prs/` sit side by side.
+The boundary rule is enforced by `tests/test_boundaries.py`: a domain package
+may import `plate.core`, but never another domain package, and `plate.core`
+never imports a domain package back (issue #50).
 
 | Module | Responsibility |
 | --- | --- |
-| `plate/cli.py` | Top-level wiring only: builds the parser, dispatches to a subcommand, turns a `PlateError` into a clean exit. Knows nothing about issues, sprints, or owners. |
+| `plate/cli.py` | Top-level wiring only: builds the parser, dispatches to a subcommand via a command→runner registry, turns a `PlateError` into a clean exit. Knows nothing about issues, sprints, owners, or PRs — this is the one place both domains may be named. |
 | `plate/core/gh.py` | The only impure module: `git`/`gh` shelling (`run_command`), repo + login detection, owner-type resolution. Failures raise `PlateError`. Shared by every domain. |
 | `plate/core/render.py` | Domain-agnostic presentation primitives: ANSI/width helpers, `format_cell`, `format_age`, `hyperlink`, `divider`. |
 | `plate/core/config.py` | The JSON config: special-label styles, the per-repo `repos` → project-board mapping, and the `owners` alias table. |
@@ -260,6 +320,10 @@ back (issue #50).
 | `plate/issues/github.py` | Issue-domain GraphQL fetches (`fetch_assigned_issues`, `fetch_owner_issues`, `fetch_sprint_items`) + pagination + board-field validation, built on `plate.core.gh`. |
 | `plate/issues/render.py` | Issue-domain presentation: `terminal_tree`/`markdown_tree`, `sprint_table`/`sprint_markdown`, `owner_tree`/`owner_markdown`, built on `plate.core.render`. |
 | `plate/issues/cli.py` | The `issues` subcommand: flags, and `run()`/`_run_yours`/`_run_owner`/`_run_sprint` dispatch (`--sprint` selects the board view, `--owner` the owner-wide view). |
+| `plate/prs/model.py` | Pure domain: raw GraphQL PR nodes → `PrRow`s (`normalize_rows`), the yours/to-review/the-rest grouping (`sort_key`), and the summary counts (`summary_counts`). |
+| `plate/prs/github.py` | PR-domain GraphQL fetch (`fetch_prs_and_viewer`) + `gh api graphql --paginate` pagination, built on `plate.core.gh`. |
+| `plate/prs/render.py` | PR-domain presentation: `terminal_table`/`markdown_table`, `summary_line`, `symbol_key`, built on `plate.core.render`. |
+| `plate/prs/cli.py` | The `prs` subcommand: flags, and `run()` — fetch, normalize, and render the open PRs for the current or named repo. |
 
 ## Design & docs
 
