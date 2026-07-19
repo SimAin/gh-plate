@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.scripts]
-issue-check = "issue_check.cli:main"
+plate = "issue_check.cli:main"
 
 [build-system]
 requires = ["hatchling"]
