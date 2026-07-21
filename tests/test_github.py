@@ -425,11 +425,8 @@ def test_fetch_owner_issues_gh_failure_raises_with_owner(
 
 # --- search_paginated transient-5xx handling (GitHub search timeouts) -------
 #
-# GitHub answers an over-expensive search page with a bare HTTP 502; the loop
-# must retry with a smaller page and only give up — with a message that names
-# the real cause — after _MAX_ATTEMPTS. These drive gh.search_paginated
-# directly with a stub query document; the sleep between attempts is patched
-# out so retries are instant.
+# These drive gh.search_paginated directly with a stub query document; the
+# sleep between retry attempts is patched out so tests are instant.
 
 
 def _page_size_of(args: list[str]) -> int:

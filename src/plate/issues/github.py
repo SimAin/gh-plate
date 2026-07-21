@@ -20,9 +20,8 @@ from .model import normalize_status, strip_emoji
 # One repo-wide query, filtered to the current user server-side. Sub-issue
 # fields (``parent``, ``subIssuesSummary``) are GraphQL-only — they are not in
 # the ``gh issue list --json`` REST field set — which is why this is GraphQL
-# from day one. ``$pageSize`` (at most 100) is set per request by
-# ``gh.search_paginated``, which paginates via ``endCursor`` when needed and
-# shrinks the page when GitHub times a request out.
+# from day one. ``gh.search_paginated`` sets ``$pageSize`` (at most 100) and
+# paginates via ``endCursor``.
 #
 # The ``parent`` chain is fetched three levels deep so the tree view can place
 # each owned issue under its (possibly un-owned) ancestors from this single

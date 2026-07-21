@@ -119,15 +119,10 @@ def resolve_owner_type(owner: str) -> str:
     )
 
 
-# GitHub's GraphQL API answers an over-expensive search with a bare HTTP 502
-# (occasionally 503/504) rather than a structured error: the query exceeded
-# its server-side time budget. Owner-wide searches hit this intermittently —
-# 100 nodes per page, each fanning out into nested connections (reviews,
-# review requests, status-check rollups), is sometimes more than GitHub will
-# compute in time under load. GitHub's own guidance is to retry and to request
-# fewer nodes per page, so ``search_paginated`` gives each page
-# ``_MAX_ATTEMPTS`` tries, halving the page size on every transient failure
-# (100 → 50 → 25) and keeping it shrunk for the rest of the run.
+# GitHub answers an over-expensive search page with a bare HTTP 502 (sometimes
+# 503/504): the query exceeded its server-side time budget. Per GitHub's own
+# guidance, retry and request fewer nodes — each page gets ``_MAX_ATTEMPTS``
+# tries, halving the page size on every transient 5xx (100 → 50 → 25).
 _TRANSIENT_HTTP = re.compile(r"HTTP (50[234])")
 _MAX_PAGE_SIZE = 100
 _MIN_PAGE_SIZE = 25
@@ -135,13 +130,9 @@ _MAX_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 1.0
 
 
-# A multi-page search — and especially one riding out 502 retries with their
-# sleeps — can take long enough that a silent terminal reads as a hang. These
-# paint a single self-overwriting status line on stderr: ``\r`` returns to the
-# line start and ``ESC[2K`` erases it, so each update replaces the last and
-# ``_progress_clear`` leaves no trace before the real output renders. Gated on
-# stderr being a TTY so pipes, redirects, and scripts see nothing (the ANSI
-# escape never reaches a non-terminal either).
+# A self-overwriting stderr status line (``\r`` + erase-line), so a slow
+# multi-page search — especially one sleeping through 502 retries — doesn't
+# read as a hang. TTY-gated: pipes, redirects, and scripts see nothing.
 def _progress(message: str) -> None:
     if not sys.stderr.isatty():
         return
@@ -170,11 +161,8 @@ def search_paginated(
     is the D8-legitimate infra move: no view behaviour depends on it.
 
     ``query`` must declare ``$pageSize: Int!`` and feed it to the search's
-    ``first:`` — this loop sizes each page to what is still needed under
-    ``limit`` (capped at GitHub's 100) and shrinks it when GitHub times a page
-    out (see ``_TRANSIENT_HTTP`` above). A transient HTTP 5xx gets retried
-    with a short pause; any other failure — and 5xx exhaustion — raises
-    :class:`PlateError`.
+    ``first:`` — pages are sized to what ``limit`` still needs and shrink
+    when GitHub times a page out (see ``_TRANSIENT_HTTP`` above).
 
     ``error_context`` is interpolated into the failure message (a repo or an
     owner name) so each caller's error stays specific to what it was fetching.
@@ -185,12 +173,8 @@ def search_paginated(
     pagination ever delivers — it is not only the true count clipped by
     ``limit``.
 
-    While fetching, a transient status line is painted on stderr (TTY only —
-    see ``_progress``): which context is being fetched, running progress once
-    a page has landed, and a note when a GitHub timeout forces a retry, since
-    the retry sleeps are otherwise indistinguishable from a hang. The
-    ``finally`` clears it on every exit — return or raise — so it never
-    contaminates the real output.
+    A transient stderr status line (see ``_progress``) shows fetch and retry
+    progress; the ``finally`` clears it on every exit, return or raise.
     """
     nodes: list[dict[str, Any]] = []
     total = 0
