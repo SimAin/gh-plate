@@ -23,10 +23,12 @@ for prefixed schemes (``status:*``)::
 
 from __future__ import annotations
 
+import difflib
 import fnmatch
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -52,6 +54,29 @@ _PROJECT_URL_RE = re.compile(
     r"(?P<owner>[^/]+)/projects/(?P<num>\d+)"
 )
 _PROJECT_SHORT_RE = re.compile(r"^(?P<owner>[^/]+)/projects/(?P<num>\d+)$")
+
+# Recognised keys per level. Unknown keys are warned about, not rejected, so a
+# config written for a newer plate still loads; a hand-edit typo just loses that
+# key silently otherwise (#33). Comparison is exact-case: real keys are
+# camelCase, so lowercase typos get flagged and a suggestion offered.
+_KNOWN_CONFIG_KEYS = ("labels", "repos", "owners")
+_KNOWN_REPO_KEYS = ("project", "sprintField", "statusField", "statusOrder")
+
+
+def _warn_unknown_keys(present: Any, known: tuple[str, ...], where: str = "") -> None:
+    """Warn on stderr for each key in ``present`` not in ``known`` (non-fatal)."""
+    if not isinstance(present, dict):
+        return
+    location = f" in {where}" if where else ""
+    for key in present:
+        if key in known:
+            continue
+        match = difflib.get_close_matches(str(key), known, n=1)
+        hint = f' (did you mean "{match[0]}"?)' if match else ""
+        print(
+            f'plate: warning: unrecognised config key "{key}"{location}{hint}',
+            file=sys.stderr,
+        )
 
 
 @dataclass(frozen=True)
@@ -161,6 +186,7 @@ def _parse_repo_settings(repo: Any, settings: Any) -> ProjectConfig:
     """Validate one ``repos`` entry into a :class:`ProjectConfig`."""
     if not isinstance(settings, dict):
         raise PlateError(f"Config for repo {repo!r} must be an object.")
+    _warn_unknown_keys(settings, _KNOWN_REPO_KEYS, where=f"repo {repo!r}")
     project = settings.get("project")
     if not isinstance(project, str) or not project.strip():
         raise PlateError(
@@ -196,6 +222,7 @@ def parse_config(data: Any) -> Config:
     styles = dict(DEFAULT_LABEL_STYLES)
     if not isinstance(data, dict):
         raise PlateError("Config root must be a JSON object.")
+    _warn_unknown_keys(data, _KNOWN_CONFIG_KEYS)
     labels = data.get("labels", {})
     if not isinstance(labels, dict):
         raise PlateError('Config "labels" must be an object of name -> style.')

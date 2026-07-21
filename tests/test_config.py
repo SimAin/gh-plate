@@ -61,6 +61,60 @@ def test_unknown_style_is_rejected(tmp_path) -> None:
         config.load_config(str(path))
 
 
+def test_unknown_top_level_key_warns_with_suggestion(tmp_path, capsys) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"lables": {"blocked": "alert"}}))
+    config.load_config(str(path))
+    err = capsys.readouterr().err
+    assert 'unrecognised config key "lables"' in err
+    assert 'did you mean "labels"?' in err
+
+
+def test_unknown_repo_level_key_warns_naming_the_repo(tmp_path, capsys) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "repos": {
+                    "an-org/a-repo": {
+                        "project": "an-org/projects/2",
+                        "sprintfield": "Sprint",
+                    }
+                }
+            }
+        )
+    )
+    config.load_config(str(path))
+    err = capsys.readouterr().err
+    assert 'unrecognised config key "sprintfield"' in err
+    assert "an-org/a-repo" in err
+    assert 'did you mean "sprintField"?' in err
+
+
+def test_valid_config_produces_no_stderr(tmp_path, capsys) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "labels": {"blocked": "alert"},
+                "repos": {"an-org/a-repo": {"project": "an-org/projects/2"}},
+                "owners": {"work": "my-work-org"},
+            }
+        )
+    )
+    config.load_config(str(path))
+    assert capsys.readouterr().err == ""
+
+
+def test_unknown_keys_never_raise(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps({"totally-unknown": 42, "labels": {"blocked": "alert"}})
+    )
+    cfg = config.load_config(str(path))
+    assert cfg.style_for("blocked") == "alert"
+
+
 def test_malformed_json_is_rejected(tmp_path) -> None:
     path = tmp_path / "config.json"
     path.write_text("{not json")
