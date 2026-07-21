@@ -20,8 +20,8 @@ from .model import normalize_status, strip_emoji
 # One repo-wide query, filtered to the current user server-side. Sub-issue
 # fields (``parent``, ``subIssuesSummary``) are GraphQL-only — they are not in
 # the ``gh issue list --json`` REST field set — which is why this is GraphQL
-# from day one. ``first: 100`` is the page cap; ``fetch_assigned_issues``
-# paginates via ``endCursor`` when needed.
+# from day one. ``gh.search_paginated`` sets ``$pageSize`` (at most 100) and
+# paginates via ``endCursor``.
 #
 # The ``parent`` chain is fetched three levels deep so the tree view can place
 # each owned issue under its (possibly un-owned) ancestors from this single
@@ -58,8 +58,8 @@ fragment NodeFields on Issue {
   subIssuesSummary { total completed }
   repository { nameWithOwner }
 }
-query($q: String!, $endCursor: String) {
-  search(query: $q, type: ISSUE, first: 100, after: $endCursor) {
+query($q: String!, $pageSize: Int!, $endCursor: String) {
+  search(query: $q, type: ISSUE, first: $pageSize, after: $endCursor) {
     issueCount
     pageInfo { hasNextPage endCursor }
     nodes {

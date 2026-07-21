@@ -91,8 +91,8 @@ fragment PrFields on PullRequest {
   }
   repository { nameWithOwner }
 }
-query($q: String!, $endCursor: String) {
-  search(query: $q, type: ISSUE, first: 100, after: $endCursor) {
+query($q: String!, $pageSize: Int!, $endCursor: String) {
+  search(query: $q, type: ISSUE, first: $pageSize, after: $endCursor) {
     issueCount
     pageInfo { hasNextPage endCursor }
     nodes {

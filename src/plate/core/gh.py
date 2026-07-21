@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
+import time
 from typing import Any
 
 _REMOTE_PATTERNS = [
@@ -117,6 +119,34 @@ def resolve_owner_type(owner: str) -> str:
     )
 
 
+# GitHub answers an over-expensive search page with a bare HTTP 502 (sometimes
+# 503/504): the query exceeded its server-side time budget. Per GitHub's own
+# guidance, retry and request fewer nodes — each page gets ``_MAX_ATTEMPTS``
+# tries, halving the page size on every transient 5xx (100 → 50 → 25).
+_TRANSIENT_HTTP = re.compile(r"HTTP (50[234])")
+_MAX_PAGE_SIZE = 100
+_MIN_PAGE_SIZE = 25
+_MAX_ATTEMPTS = 3
+_RETRY_DELAY_SECONDS = 1.0
+
+
+# A self-overwriting stderr status line (``\r`` + erase-line), so a slow
+# multi-page search — especially one sleeping through 502 retries — doesn't
+# read as a hang. TTY-gated: pipes, redirects, and scripts see nothing.
+def _progress(message: str) -> None:
+    if not sys.stderr.isatty():
+        return
+    sys.stderr.write(f"\r\x1b[2K{message}")
+    sys.stderr.flush()
+
+
+def _progress_clear() -> None:
+    if not sys.stderr.isatty():
+        return
+    sys.stderr.write("\r\x1b[2K")
+    sys.stderr.flush()
+
+
 def search_paginated(
     query: str, query_str: str, limit: int, error_context: str
 ) -> tuple[list[dict[str, Any]], int]:
@@ -124,11 +154,15 @@ def search_paginated(
 
     The shared engine behind every owner/repo-scoped GitHub search across
     domains: the issue owner/assigned views and the PR owner view are all the
-    same top-level ``search(type: ISSUE, first: 100, after: $endCursor)``
+    same top-level ``search(type: ISSUE, first: $pageSize, after: $endCursor)``
     connection under a caller-supplied GraphQL document (``query``), differing
     only in the node fields each requests and the qualifiers built into
     ``query_str``. Keeping the cursor loop here — rather than once per domain —
     is the D8-legitimate infra move: no view behaviour depends on it.
+
+    ``query`` must declare ``$pageSize: Int!`` and feed it to the search's
+    ``first:`` — pages are sized to what ``limit`` still needs and shrink
+    when GitHub times a page out (see ``_TRANSIENT_HTTP`` above).
 
     ``error_context`` is interpolated into the failure message (a repo or an
     owner name) so each caller's error stays specific to what it was fetching.
@@ -138,39 +172,77 @@ def search_paginated(
     search at 1000 results, so for a large owner ``total`` can exceed what
     pagination ever delivers — it is not only the true count clipped by
     ``limit``.
+
+    A transient stderr status line (see ``_progress``) shows fetch and retry
+    progress; the ``finally`` clears it on every exit, return or raise.
     """
     nodes: list[dict[str, Any]] = []
     total = 0
     cursor: str | None = None
+    page_cap = _MAX_PAGE_SIZE
 
-    while True:
-        args = [
-            "gh", "api", "graphql",
-            "-f", f"query={query}",
-            "-f", f"q={query_str}",
-        ]
-        if cursor:
-            args += ["-f", f"endCursor={cursor}"]
+    try:
+        while True:
+            status = "5xx"
+            for attempt in range(1, _MAX_ATTEMPTS + 1):
+                fetched = f" {len(nodes)}/{min(total, limit)}" if nodes else ""
+                _progress(f"Fetching from GitHub for {error_context}…{fetched}")
+                page_size = min(page_cap, limit - len(nodes))
+                args = [
+                    "gh", "api", "graphql",
+                    "-f", f"query={query}",
+                    "-f", f"q={query_str}",
+                    "-F", f"pageSize={page_size}",
+                ]
+                if cursor:
+                    args += ["-f", f"endCursor={cursor}"]
 
-        result = run_command(args)
-        if result.returncode != 0:
-            raise PlateError(
-                f"gh search failed for {error_context}:\n{result.stderr.strip()}"
-            )
-        try:
-            payload = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise PlateError(f"Could not parse gh response: {exc}") from exc
-        if payload.get("errors"):
-            raise PlateError("GraphQL error: " + json.dumps(payload["errors"]))
+                result = run_command(args)
+                if result.returncode == 0:
+                    break
+                transient = _TRANSIENT_HTTP.search(result.stderr)
+                if not transient:
+                    raise PlateError(
+                        f"gh search failed for {error_context}:\n"
+                        f"{result.stderr.strip()}"
+                    )
+                status = transient.group(1)
+                page_cap = max(page_cap // 2, _MIN_PAGE_SIZE)
+                if attempt < _MAX_ATTEMPTS:
+                    _progress(
+                        f"GitHub timed out (HTTP {status}) — retrying with "
+                        f"page size {page_cap} "
+                        f"(attempt {attempt + 1}/{_MAX_ATTEMPTS})…"
+                    )
+                    time.sleep(_RETRY_DELAY_SECONDS * attempt)
+            else:
+                raise PlateError(
+                    f"gh search failed for {error_context}: GitHub answered "
+                    f"HTTP {status} on {_MAX_ATTEMPTS} attempts "
+                    f"(page size reduced to {page_cap}).\n"
+                    "That status is GitHub timing the search out server-side "
+                    "— it happens intermittently on large owner-wide "
+                    "searches. Wait a moment and rerun; if it persists, try "
+                    "a lower --limit."
+                )
+            try:
+                payload = json.loads(result.stdout)
+            except json.JSONDecodeError as exc:
+                raise PlateError(f"Could not parse gh response: {exc}") from exc
+            if payload.get("errors"):
+                raise PlateError(
+                    "GraphQL error: " + json.dumps(payload["errors"])
+                )
 
-        search = (payload.get("data") or {}).get("search") or {}
-        total = search.get("issueCount", total)
-        nodes.extend(node for node in (search.get("nodes") or []) if node)
+            search = (payload.get("data") or {}).get("search") or {}
+            total = search.get("issueCount", total)
+            nodes.extend(node for node in (search.get("nodes") or []) if node)
 
-        if len(nodes) >= limit:
-            return nodes[:limit], total
-        page = search.get("pageInfo") or {}
-        cursor = page.get("endCursor")
-        if not page.get("hasNextPage") or not cursor:
-            return nodes, total
+            if len(nodes) >= limit:
+                return nodes[:limit], total
+            page = search.get("pageInfo") or {}
+            cursor = page.get("endCursor")
+            if not page.get("hasNextPage") or not cursor:
+                return nodes, total
+    finally:
+        _progress_clear()

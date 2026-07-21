@@ -12,8 +12,10 @@ one patch target intercepts all of them.
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -419,3 +421,159 @@ def test_fetch_owner_issues_gh_failure_raises_with_owner(
     monkeypatch.setattr(gh, "run_command", fake_run)
     with pytest.raises(gh.PlateError, match="acme"):
         github.fetch_owner_issues("acme", "organization", "alice", 5, mine=False)
+
+
+# --- search_paginated transient-5xx handling (GitHub search timeouts) -------
+#
+# These drive gh.search_paginated directly with a stub query document; the
+# sleep between retry attempts is patched out so tests are instant.
+
+
+def _page_size_of(args: list[str]) -> int:
+    arg = next(a for a in args if a.startswith("pageSize="))
+    return int(arg.removeprefix("pageSize="))
+
+
+def _flaky_fake_run(failures: int, stdout: str) -> Any:
+    """A fake ``run_command`` failing with HTTP 502 ``failures`` times first."""
+    seen: list[list[str]] = []
+
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        seen.append(args)
+        if len(seen) <= failures:
+            return subprocess.CompletedProcess(
+                args, 1, stdout="", stderr="gh: HTTP 502"
+            )
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+
+    fake_run.seen = seen  # type: ignore[attr-defined]
+    return fake_run
+
+
+def test_search_paginated_retries_transient_502_with_smaller_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_run = _flaky_fake_run(1, _search_payload(1, [{"number": 7}]))
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
+
+    nodes, total = gh.search_paginated("QUERY", "q-str", 500, "acme")
+
+    assert [n["number"] for n in nodes] == [7]
+    assert total == 1
+    seen = fake_run.seen  # type: ignore[attr-defined]
+    assert [_page_size_of(args) for args in seen] == [100, 50]
+
+
+def test_search_paginated_persistent_502_raises_actionable_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_run = _flaky_fake_run(99, "")
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(gh.PlateError) as excinfo:
+        gh.search_paginated("QUERY", "q-str", 500, "acme")
+
+    message = str(excinfo.value)
+    assert "acme" in message
+    assert "HTTP 502" in message
+    assert "server-side" in message
+    assert len(fake_run.seen) == gh._MAX_ATTEMPTS  # type: ignore[attr-defined]
+
+
+def test_search_paginated_non_transient_failure_does_not_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, 1, stdout="", stderr="gh: HTTP 401 Bad credentials"
+        )
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    with pytest.raises(gh.PlateError, match="Bad credentials"):
+        gh.search_paginated("QUERY", "q-str", 500, "acme")
+
+
+def test_search_paginated_requests_only_what_limit_needs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_run = _flaky_fake_run(0, _search_payload(2, [{"number": 1}]))
+    monkeypatch.setattr(gh, "run_command", fake_run)
+
+    gh.search_paginated("QUERY", "q-str", 5, "acme")
+
+    seen = fake_run.seen  # type: ignore[attr-defined]
+    assert _page_size_of(seen[0]) == 5
+
+
+# --- the transient stderr progress line -------------------------------------
+
+
+class _TtyStderr(io.StringIO):
+    """A StringIO posing as a terminal, so ``gh._progress`` writes to it."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+def test_search_paginated_paints_and_clears_progress_on_a_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setattr(
+        gh, "run_command", _flaky_fake_run(0, _search_payload(1, [{"number": 1}]))
+    )
+
+    gh.search_paginated("QUERY", "q-str", 500, "acme")
+
+    output = stderr.getvalue()
+    assert "Fetching from GitHub for acme…" in output
+    assert output.endswith("\r\x1b[2K")  # cleared before real output renders
+
+
+def test_search_paginated_progress_reports_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        gh, "run_command", _flaky_fake_run(1, _search_payload(1, [{"number": 1}]))
+    )
+
+    gh.search_paginated("QUERY", "q-str", 500, "acme")
+
+    output = stderr.getvalue()
+    assert "GitHub timed out (HTTP 502)" in output
+    assert "page size 50" in output
+    assert output.endswith("\r\x1b[2K")
+
+
+def test_search_paginated_clears_progress_when_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(gh, "run_command", _flaky_fake_run(99, ""))
+
+    with pytest.raises(gh.PlateError):
+        gh.search_paginated("QUERY", "q-str", 500, "acme")
+
+    assert stderr.getvalue().endswith("\r\x1b[2K")
+
+
+def test_search_paginated_is_silent_when_stderr_is_not_a_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stderr = io.StringIO()  # isatty() is False
+    monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setattr(
+        gh, "run_command", _flaky_fake_run(0, _search_payload(1, [{"number": 1}]))
+    )
+
+    gh.search_paginated("QUERY", "q-str", 500, "acme")
+
+    assert stderr.getvalue() == ""
