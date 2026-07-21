@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.2.0](https://github.com/SimAin/gh-plate/compare/v1.1.0...v1.2.0) (2026-07-21)
+
+
+### Features
+
+* **core:** paint fetch progress on stderr during searches ([a8e2231](https://github.com/SimAin/gh-plate/commit/a8e223141745cf34f85b8e275173dfc37db8b8aa))
+
+
+### Bug Fixes
+
+* **core:** retry GitHub search timeouts with shrinking pages ([0762811](https://github.com/SimAin/gh-plate/commit/07628118362371a8b45e42ed65ed5d156a477232))
+* **core:** survive GitHub search timeouts in owner views ([712c29b](https://github.com/SimAin/gh-plate/commit/712c29b310ba781d95fba9d7e4acc9d084fd8c02))
+
+
+### Documentation
+
+* **core:** trim the retry and progress comments ([7dd8b2d](https://github.com/SimAin/gh-plate/commit/7dd8b2d38474f0a67aa3012904ebb871e94963da))
+
 ## [1.1.0](https://github.com/SimAin/gh-plate/compare/v1.0.0...v1.1.0) (2026-07-19)
 
 
