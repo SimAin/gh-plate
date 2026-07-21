@@ -80,6 +80,11 @@ def test_emoji_shortcodes_stripped_from_owned_labels() -> None:
     assert idx[k(1)].labels == ["bug", "epic"]
 
 
+def test_hyphenated_emoji_shortcodes_stripped_from_owned_labels() -> None:
+    idx = index([make_issue(1, labels=[":e-mail: correspondence", ":t-rex: legacy"])])
+    assert idx[k(1)].labels == ["correspondence", "legacy"]
+
+
 def test_age_and_staleness() -> None:
     idx = index([make_issue(1, updated_days_ago=3), make_issue(2, updated_days_ago=40)])
     assert (idx[k(1)].age_days, idx[k(1)].is_stale) == (3, False)

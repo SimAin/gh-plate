@@ -43,7 +43,7 @@ IssueKey = tuple[str, int]
 
 # Labels in the wild carry literal emoji shortcodes (e.g. ":cockroach: bug").
 # They are noise in a width-constrained column, so we strip them.
-_EMOJI_SHORTCODE_RE = re.compile(r":[a-z0-9_+]+:\s*")
+_EMOJI_SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:\s*")
 
 ACTIVE = "active"
 STALE = "stale"
