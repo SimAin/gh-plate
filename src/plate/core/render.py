@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import unicodedata
 
 # xterm-256 soft tints — muted hues so a coloured glyph reads as signal, not noise.
 SOFT_GREEN = "\033[38;5;151m"
@@ -28,20 +29,48 @@ ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 _OSC8_RE = re.compile(r"\033\]8;[^\033\007]*(?:\033\\|\007)")
 
 
+# Zero-width code points that carry no column despite not being combining marks:
+# ZWJ, the text/emoji variation selectors, and the zero-width space.
+_ZERO_WIDTH = frozenset(chr(cp) for cp in (0x200D, 0xFE0E, 0xFE0F, 0x200B))
+
+
+def char_width(ch: str) -> int:
+    """Display columns of one character: 0 for combining/zero-width, 2 for East
+    Asian wide/fullwidth (CJK and modern emoji), 1 otherwise. Multi-emoji ZWJ
+    sequences may still overcount vs some terminals — same limit as wcwidth.
+    """
+    if unicodedata.combining(ch) or ch in _ZERO_WIDTH:
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
 def visible_text(value: str) -> str:
     return ANSI_RE.sub("", _OSC8_RE.sub("", value))
 
 
 def visible_length(value: str) -> int:
-    return len(visible_text(value))
+    return sum(char_width(ch) for ch in visible_text(value))
 
 
 def truncate(value: str, max_length: int) -> str:
-    if len(value) <= max_length:
+    """Cut ``value`` to ``max_length`` display columns, marking a cut with ``…``.
+
+    Widths are display columns (CJK/emoji count as two), so both the length test
+    and the slice reserve one column for the ellipsis and never split a
+    double-width glyph across the budget.
+    """
+    if visible_length(value) <= max_length:
         return value
     if max_length <= 1:
         return value[:max_length]
-    return value[: max_length - 1] + "…"
+    budget = max_length - 1  # reserve one column for the ellipsis
+    out, used = "", 0
+    for ch in value:
+        w = char_width(ch)
+        if used + w > budget:
+            break
+        out, used = out + ch, used + w
+    return out + "…"
 
 
 def colorize(value: str, color: str, enabled: bool) -> str:

@@ -247,6 +247,32 @@ and `PrRow` gains a `repo` field read from each node's
 
 ---
 
+## D10 — Display width via stdlib `unicodedata`, no `wcwidth` dependency (issue #9)
+
+**Decision:** The width math behind every table (`visible_length`, `truncate`,
+`format_cell`) measures **display columns**, not code points, computed with a
+small `char_width` helper over the stdlib: combining marks and the zero-width
+code points (ZWJ, variation selectors, zero-width space) count 0, East Asian
+`W`/`F` (CJK and modern emoji) count 2, everything else counts 1. No new
+dependency and no vendored width table.
+
+**Why:** Emoji- and CJK-prefixed titles are common, and code-point counting
+shifted every column to their right — ragged tables in exactly the repos most
+likely to adopt the tool (issue #9). The zero-dependency stance (D5/D8's 3.11
+stdlib-only floor) rules out `wcwidth`; a vendored table is maintenance the
+stdlib already carries. `east_asian_width` gets CJK and East-Asian-Wide emoji
+right for one small function.
+
+**Consequence:** Fixing the three `core/render.py` primitives fixes every view,
+since all renderers funnel through them; `truncate` now budgets and slices in
+columns, reserving one for the `…` and never splitting a double-width glyph.
+**Known limitation, accepted:** multi-emoji ZWJ sequences (family emoji, etc.)
+can still overcount versus some terminals — the same limit as `wcwidth`; no
+grapheme clustering is attempted. The Status-cell `strip_emoji` workaround
+stays (it serves statusOrder matching, #7); its retirement is a follow-up.
+
+---
+
 ## Standing decisions carried from the architecture discussion
 
 - **Standalone, not a shared package.** The GraphQL fetch layer is specific enough
