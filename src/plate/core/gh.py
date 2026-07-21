@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import time
 from typing import Any
 
@@ -134,6 +135,27 @@ _MAX_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 1.0
 
 
+# A multi-page search — and especially one riding out 502 retries with their
+# sleeps — can take long enough that a silent terminal reads as a hang. These
+# paint a single self-overwriting status line on stderr: ``\r`` returns to the
+# line start and ``ESC[2K`` erases it, so each update replaces the last and
+# ``_progress_clear`` leaves no trace before the real output renders. Gated on
+# stderr being a TTY so pipes, redirects, and scripts see nothing (the ANSI
+# escape never reaches a non-terminal either).
+def _progress(message: str) -> None:
+    if not sys.stderr.isatty():
+        return
+    sys.stderr.write(f"\r\x1b[2K{message}")
+    sys.stderr.flush()
+
+
+def _progress_clear() -> None:
+    if not sys.stderr.isatty():
+        return
+    sys.stderr.write("\r\x1b[2K")
+    sys.stderr.flush()
+
+
 def search_paginated(
     query: str, query_str: str, limit: int, error_context: str
 ) -> tuple[list[dict[str, Any]], int]:
@@ -162,62 +184,81 @@ def search_paginated(
     search at 1000 results, so for a large owner ``total`` can exceed what
     pagination ever delivers — it is not only the true count clipped by
     ``limit``.
+
+    While fetching, a transient status line is painted on stderr (TTY only —
+    see ``_progress``): which context is being fetched, running progress once
+    a page has landed, and a note when a GitHub timeout forces a retry, since
+    the retry sleeps are otherwise indistinguishable from a hang. The
+    ``finally`` clears it on every exit — return or raise — so it never
+    contaminates the real output.
     """
     nodes: list[dict[str, Any]] = []
     total = 0
     cursor: str | None = None
     page_cap = _MAX_PAGE_SIZE
 
-    while True:
-        status = "5xx"
-        for attempt in range(1, _MAX_ATTEMPTS + 1):
-            page_size = min(page_cap, limit - len(nodes))
-            args = [
-                "gh", "api", "graphql",
-                "-f", f"query={query}",
-                "-f", f"q={query_str}",
-                "-F", f"pageSize={page_size}",
-            ]
-            if cursor:
-                args += ["-f", f"endCursor={cursor}"]
+    try:
+        while True:
+            status = "5xx"
+            for attempt in range(1, _MAX_ATTEMPTS + 1):
+                fetched = f" {len(nodes)}/{min(total, limit)}" if nodes else ""
+                _progress(f"Fetching from GitHub for {error_context}…{fetched}")
+                page_size = min(page_cap, limit - len(nodes))
+                args = [
+                    "gh", "api", "graphql",
+                    "-f", f"query={query}",
+                    "-f", f"q={query_str}",
+                    "-F", f"pageSize={page_size}",
+                ]
+                if cursor:
+                    args += ["-f", f"endCursor={cursor}"]
 
-            result = run_command(args)
-            if result.returncode == 0:
-                break
-            transient = _TRANSIENT_HTTP.search(result.stderr)
-            if not transient:
+                result = run_command(args)
+                if result.returncode == 0:
+                    break
+                transient = _TRANSIENT_HTTP.search(result.stderr)
+                if not transient:
+                    raise PlateError(
+                        f"gh search failed for {error_context}:\n"
+                        f"{result.stderr.strip()}"
+                    )
+                status = transient.group(1)
+                page_cap = max(page_cap // 2, _MIN_PAGE_SIZE)
+                if attempt < _MAX_ATTEMPTS:
+                    _progress(
+                        f"GitHub timed out (HTTP {status}) — retrying with "
+                        f"page size {page_cap} "
+                        f"(attempt {attempt + 1}/{_MAX_ATTEMPTS})…"
+                    )
+                    time.sleep(_RETRY_DELAY_SECONDS * attempt)
+            else:
                 raise PlateError(
-                    f"gh search failed for {error_context}:\n"
-                    f"{result.stderr.strip()}"
+                    f"gh search failed for {error_context}: GitHub answered "
+                    f"HTTP {status} on {_MAX_ATTEMPTS} attempts "
+                    f"(page size reduced to {page_cap}).\n"
+                    "That status is GitHub timing the search out server-side "
+                    "— it happens intermittently on large owner-wide "
+                    "searches. Wait a moment and rerun; if it persists, try "
+                    "a lower --limit."
                 )
-            status = transient.group(1)
-            page_cap = max(page_cap // 2, _MIN_PAGE_SIZE)
-            if attempt < _MAX_ATTEMPTS:
-                time.sleep(_RETRY_DELAY_SECONDS * attempt)
-        else:
-            raise PlateError(
-                f"gh search failed for {error_context}: GitHub answered "
-                f"HTTP {status} on {_MAX_ATTEMPTS} attempts "
-                f"(page size reduced to {page_cap}).\n"
-                "That status is GitHub timing the search out server-side — "
-                "it happens intermittently on large owner-wide searches. "
-                "Wait a moment and rerun; if it persists, try a lower "
-                "--limit."
-            )
-        try:
-            payload = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise PlateError(f"Could not parse gh response: {exc}") from exc
-        if payload.get("errors"):
-            raise PlateError("GraphQL error: " + json.dumps(payload["errors"]))
+            try:
+                payload = json.loads(result.stdout)
+            except json.JSONDecodeError as exc:
+                raise PlateError(f"Could not parse gh response: {exc}") from exc
+            if payload.get("errors"):
+                raise PlateError(
+                    "GraphQL error: " + json.dumps(payload["errors"])
+                )
 
-        search = (payload.get("data") or {}).get("search") or {}
-        total = search.get("issueCount", total)
-        nodes.extend(node for node in (search.get("nodes") or []) if node)
+            search = (payload.get("data") or {}).get("search") or {}
+            total = search.get("issueCount", total)
+            nodes.extend(node for node in (search.get("nodes") or []) if node)
 
-        if len(nodes) >= limit:
-            return nodes[:limit], total
-        page = search.get("pageInfo") or {}
-        cursor = page.get("endCursor")
-        if not page.get("hasNextPage") or not cursor:
-            return nodes, total
+            if len(nodes) >= limit:
+                return nodes[:limit], total
+            page = search.get("pageInfo") or {}
+            cursor = page.get("endCursor")
+            if not page.get("hasNextPage") or not cursor:
+                return nodes, total
+    finally:
+        _progress_clear()

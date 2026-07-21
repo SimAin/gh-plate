@@ -12,8 +12,10 @@ one patch target intercepts all of them.
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -506,3 +508,75 @@ def test_search_paginated_requests_only_what_limit_needs(
 
     seen = fake_run.seen  # type: ignore[attr-defined]
     assert _page_size_of(seen[0]) == 5
+
+
+# --- the transient stderr progress line -------------------------------------
+
+
+class _TtyStderr(io.StringIO):
+    """A StringIO posing as a terminal, so ``gh._progress`` writes to it."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+def test_search_paginated_paints_and_clears_progress_on_a_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setattr(
+        gh, "run_command", _flaky_fake_run(0, _search_payload(1, [{"number": 1}]))
+    )
+
+    gh.search_paginated("QUERY", "q-str", 500, "acme")
+
+    output = stderr.getvalue()
+    assert "Fetching from GitHub for acme…" in output
+    assert output.endswith("\r\x1b[2K")  # cleared before real output renders
+
+
+def test_search_paginated_progress_reports_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        gh, "run_command", _flaky_fake_run(1, _search_payload(1, [{"number": 1}]))
+    )
+
+    gh.search_paginated("QUERY", "q-str", 500, "acme")
+
+    output = stderr.getvalue()
+    assert "GitHub timed out (HTTP 502)" in output
+    assert "page size 50" in output
+    assert output.endswith("\r\x1b[2K")
+
+
+def test_search_paginated_clears_progress_when_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(gh, "run_command", _flaky_fake_run(99, ""))
+
+    with pytest.raises(gh.PlateError):
+        gh.search_paginated("QUERY", "q-str", 500, "acme")
+
+    assert stderr.getvalue().endswith("\r\x1b[2K")
+
+
+def test_search_paginated_is_silent_when_stderr_is_not_a_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stderr = io.StringIO()  # isatty() is False
+    monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setattr(
+        gh, "run_command", _flaky_fake_run(0, _search_payload(1, [{"number": 1}]))
+    )
+
+    gh.search_paginated("QUERY", "q-str", 500, "acme")
+
+    assert stderr.getvalue() == ""
