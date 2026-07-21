@@ -103,7 +103,7 @@ PR_MD_WORDS = {
 }
 
 
-def _pack_labels(labels: list[str], width: int) -> str:
+def _pack_labels(labels: list[str], width: int, hidden: int = 0) -> str:
     """Greedy whole-label packing with a ``+N`` overflow count (plain text).
 
     Labels are joined with `` · `` left-to-right while they (plus the eventual
@@ -111,25 +111,30 @@ def _pack_labels(labels: list[str], width: int) -> str:
     context indicator instead of a mid-word-truncated run. A single label that
     alone exceeds the column is the only thing ever ellipsis-truncated — and it
     is unambiguous, since there is nothing else it could be mashed against.
+
+    ``+N`` = labels that didn't fit here plus ``hidden``, the unfetched tail
+    (``labels_total - raw_fetched``). We can't classify labels never fetched, so
+    every one counts as overflow — exact for what we saw, honest about the rest.
     """
     if not labels:
-        return ""
+        # No visible labels, but an unfetched tail still counts as +N.
+        return f"+{hidden}" if hidden > 0 else ""
     sep = " · "
     placed: list[str] = []
     for label in labels:
-        remaining = len(labels) - (len(placed) + 1)
+        remaining = len(labels) - (len(placed) + 1) + hidden
         suffix = f" +{remaining}" if remaining > 0 else ""
         if len(sep.join([*placed, label]) + suffix) <= width:
             placed.append(label)
         else:
             break
     if placed:
-        remaining = len(labels) - len(placed)
+        remaining = len(labels) - len(placed) + hidden
         suffix = f" +{remaining}" if remaining > 0 else ""
         return sep.join(placed) + suffix
     # Nothing fit: a single over-long first label. Keep the +N when more labels
     # follow (truncating only this one) so the count is never silently lost.
-    remaining = len(labels) - 1
+    remaining = len(labels) - 1 + hidden
     suffix = f" +{remaining}" if remaining > 0 else ""
     return truncate(labels[0], width - len(suffix)) + suffix
 
@@ -139,6 +144,7 @@ def format_labels(
     width: int,
     use_color: bool = False,
     resolver: Callable[[str], str | None] | None = None,
+    hidden: int = 0,
 ) -> str:
     """Render the Labels cell: special labels promoted + coloured, rest packed.
 
@@ -146,10 +152,13 @@ def format_labels(
     ``None``. Recognised labels are pulled to the **front**, shown bright in the
     style colour; ``hide`` drops a label; everything else is packed dim with the
     ``+N`` overflow count (see :func:`_pack_labels`). With no resolver this is
-    just the plain packed cell, so existing behaviour is unchanged.
+    just the plain packed cell, so existing behaviour is unchanged. ``hidden`` is
+    the unfetched-label tail folded into the ``+N`` (see :func:`_pack_labels`).
     """
     if not labels:
-        return ""
+        # No fetched-visible labels, but an unfetched tail still reads as +N.
+        tail = _pack_labels([], width, hidden)
+        return dim(tail, use_color) if tail else ""
     resolve = resolver or _no_style
     sep = " · "
     specials: list[str] = []  # already-coloured chunks, shown bright
@@ -173,7 +182,7 @@ def format_labels(
     else:
         remaining = width
 
-    normals_plain = _pack_labels(normals, remaining) if remaining > 0 else ""
+    normals_plain = _pack_labels(normals, remaining, hidden) if remaining > 0 else ""
     parts = [
         part
         for part in (sep.join(specials), dim(normals_plain, use_color))
@@ -253,7 +262,9 @@ def terminal_tree(
                 if row.is_stale
                 else dim(age_text, use_color)
             )
-            labels = format_labels(row.labels, LABELS_W, use_color, resolver)
+            labels = format_labels(
+                row.labels, LABELS_W, use_color, resolver, row.labels_hidden
+            )
             cmt = dim(str(row.comments_count), use_color)
         else:
             # context ancestor: structure only, no health/labels/comments
@@ -412,7 +423,9 @@ def _sprint_row_line(
             if row.is_stale
             else dim(age_text, use_color)
         )
-        labels = format_labels(row.labels, SPRINT_LABELS_W, use_color, resolver)
+        labels = format_labels(
+            row.labels, SPRINT_LABELS_W, use_color, resolver, row.labels_hidden
+        )
         values = [issue, age, assignee, status, labels,
                   dim(prog, use_color), dim(cmt, use_color)]
         return "  ".join(
@@ -426,7 +439,8 @@ def _sprint_row_line(
     resolve = resolver or _no_style
     visible_labels = [name for name in row.labels if resolve(name) != "hide"]
     values = [issue, age_text, assignee, status,
-              _pack_labels(visible_labels, SPRINT_LABELS_W), prog, cmt]
+              _pack_labels(visible_labels, SPRINT_LABELS_W, row.labels_hidden),
+              prog, cmt]
     line = "  ".join(
         format_cell(v, w, a)
         for v, (_, w, a) in zip(values, columns, strict=True)
@@ -597,7 +611,9 @@ def _owner_row_line(
             if cls == ROW_MINE and row.assignees
             else "—"
         )
-        labels = format_labels(row.labels, SPRINT_LABELS_W, use_color, resolver)
+        labels = format_labels(
+            row.labels, SPRINT_LABELS_W, use_color, resolver, row.labels_hidden
+        )
         values = [issue, age, assignee, labels,
                   dim(prog, use_color), dim(str(row.comments_count), use_color)]
         return "  ".join(
@@ -620,8 +636,8 @@ def _owner_row_line(
     assignee = row.assignees[0] if row.assignees else "—"
     visible_labels = [name for name in row.labels if resolve(name) != "hide"]
     values = [issue, age_text, assignee,
-              _pack_labels(visible_labels, SPRINT_LABELS_W), prog,
-              str(row.comments_count)]
+              _pack_labels(visible_labels, SPRINT_LABELS_W, row.labels_hidden),
+              prog, str(row.comments_count)]
     line = "  ".join(
         format_cell(v, w, a)
         for v, (_, w, a) in zip(values, columns, strict=True)
