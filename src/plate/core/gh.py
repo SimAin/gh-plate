@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from typing import Any
 
 _REMOTE_PATTERNS = [
@@ -117,6 +118,22 @@ def resolve_owner_type(owner: str) -> str:
     )
 
 
+# GitHub's GraphQL API answers an over-expensive search with a bare HTTP 502
+# (occasionally 503/504) rather than a structured error: the query exceeded
+# its server-side time budget. Owner-wide searches hit this intermittently —
+# 100 nodes per page, each fanning out into nested connections (reviews,
+# review requests, status-check rollups), is sometimes more than GitHub will
+# compute in time under load. GitHub's own guidance is to retry and to request
+# fewer nodes per page, so ``search_paginated`` gives each page
+# ``_MAX_ATTEMPTS`` tries, halving the page size on every transient failure
+# (100 → 50 → 25) and keeping it shrunk for the rest of the run.
+_TRANSIENT_HTTP = re.compile(r"HTTP (50[234])")
+_MAX_PAGE_SIZE = 100
+_MIN_PAGE_SIZE = 25
+_MAX_ATTEMPTS = 3
+_RETRY_DELAY_SECONDS = 1.0
+
+
 def search_paginated(
     query: str, query_str: str, limit: int, error_context: str
 ) -> tuple[list[dict[str, Any]], int]:
@@ -124,11 +141,18 @@ def search_paginated(
 
     The shared engine behind every owner/repo-scoped GitHub search across
     domains: the issue owner/assigned views and the PR owner view are all the
-    same top-level ``search(type: ISSUE, first: 100, after: $endCursor)``
+    same top-level ``search(type: ISSUE, first: $pageSize, after: $endCursor)``
     connection under a caller-supplied GraphQL document (``query``), differing
     only in the node fields each requests and the qualifiers built into
     ``query_str``. Keeping the cursor loop here — rather than once per domain —
     is the D8-legitimate infra move: no view behaviour depends on it.
+
+    ``query`` must declare ``$pageSize: Int!`` and feed it to the search's
+    ``first:`` — this loop sizes each page to what is still needed under
+    ``limit`` (capped at GitHub's 100) and shrinks it when GitHub times a page
+    out (see ``_TRANSIENT_HTTP`` above). A transient HTTP 5xx gets retried
+    with a short pause; any other failure — and 5xx exhaustion — raises
+    :class:`PlateError`.
 
     ``error_context`` is interpolated into the failure message (a repo or an
     owner name) so each caller's error stays specific to what it was fetching.
@@ -142,20 +166,43 @@ def search_paginated(
     nodes: list[dict[str, Any]] = []
     total = 0
     cursor: str | None = None
+    page_cap = _MAX_PAGE_SIZE
 
     while True:
-        args = [
-            "gh", "api", "graphql",
-            "-f", f"query={query}",
-            "-f", f"q={query_str}",
-        ]
-        if cursor:
-            args += ["-f", f"endCursor={cursor}"]
+        status = "5xx"
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            page_size = min(page_cap, limit - len(nodes))
+            args = [
+                "gh", "api", "graphql",
+                "-f", f"query={query}",
+                "-f", f"q={query_str}",
+                "-F", f"pageSize={page_size}",
+            ]
+            if cursor:
+                args += ["-f", f"endCursor={cursor}"]
 
-        result = run_command(args)
-        if result.returncode != 0:
+            result = run_command(args)
+            if result.returncode == 0:
+                break
+            transient = _TRANSIENT_HTTP.search(result.stderr)
+            if not transient:
+                raise PlateError(
+                    f"gh search failed for {error_context}:\n"
+                    f"{result.stderr.strip()}"
+                )
+            status = transient.group(1)
+            page_cap = max(page_cap // 2, _MIN_PAGE_SIZE)
+            if attempt < _MAX_ATTEMPTS:
+                time.sleep(_RETRY_DELAY_SECONDS * attempt)
+        else:
             raise PlateError(
-                f"gh search failed for {error_context}:\n{result.stderr.strip()}"
+                f"gh search failed for {error_context}: GitHub answered "
+                f"HTTP {status} on {_MAX_ATTEMPTS} attempts "
+                f"(page size reduced to {page_cap}).\n"
+                "That status is GitHub timing the search out server-side — "
+                "it happens intermittently on large owner-wide searches. "
+                "Wait a moment and rerun; if it persists, try a lower "
+                "--limit."
             )
         try:
             payload = json.loads(result.stdout)
