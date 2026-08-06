@@ -17,10 +17,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 DEFAULT_STALE_DAYS = 14
+TIMELINE_DAYS = 28
 
 # release-please titles this repo's release PRs ``chore(main): release 0.5.0``
 # (scope = the release branch, suffix = the computed version); the standalone
@@ -29,6 +30,20 @@ DEFAULT_STALE_DAYS = 14
 # after ``release`` (the version), while the ``chore … release`` anchoring
 # keeps it from ever matching an ordinary PR.
 _RELEASE_PR_RE = re.compile(r"^chore(?:\([^)]*\))?: release\b")
+
+
+@dataclass(frozen=True)
+class DayEvent:
+    """The winning human event of one timeline day.
+
+    ``kind`` is commit/review/comment; ``review_state`` is set for reviews
+    (APPROVED, CHANGES_REQUESTED, …); ``mine`` is viewer-relative, None when
+    the actor or viewer is unknown.
+    """
+
+    kind: str
+    review_state: str | None
+    mine: bool | None
 
 
 @dataclass(frozen=True)
@@ -51,6 +66,9 @@ class PrRow:
     direction — True you moved last, False another human did, None when no
     direction can be claimed. The per-channel lags are kept for future
     heuristics even though the views render only their max.
+
+    ``timeline`` is the day-bucketed strip data (oldest first, last entry =
+    today), or None when the events connection wasn't fetched.
     """
 
     repo: str
@@ -73,6 +91,7 @@ class PrRow:
     last_commit_days: int | None
     last_review_days: int | None
     last_comment_days: int | None
+    timeline: list[DayEvent | None] | None
     has_conflicts: bool
     mergeable_unknown: bool
     check_state: str
@@ -294,6 +313,78 @@ def last_human_activity(
     return channel_days, days, login, False
 
 
+# One glyph per UTC day, worst-first precedence within a day; ties on rank go
+# to the later event (its review_state is what the day ends on).
+_TIMELINE_RANK = {"comment": 0, "commit": 1, "review": 2}
+
+
+def _timeline_event(node: dict[str, Any]) -> tuple[str, Any, Any, str | None] | None:
+    """``(kind, timestamp, author, review_state)`` for one timeline node."""
+    typename = node.get("__typename")
+    if typename == "PullRequestCommit":
+        commit = node.get("commit")
+        if not isinstance(commit, dict):
+            return None
+        author = commit.get("author")
+        user = author.get("user") if isinstance(author, dict) else None
+        return "commit", commit.get("committedDate"), user, None
+    if typename == "PullRequestReview":
+        state = node.get("state")
+        return (
+            "review",
+            node.get("submittedAt"),
+            node.get("author"),
+            state if isinstance(state, str) else None,
+        )
+    if typename == "IssueComment":
+        return "comment", node.get("createdAt"), node.get("author"), None
+    return None
+
+
+def timeline_buckets(
+    pr: dict[str, Any], current_login: str | None, now: datetime | None
+) -> list[DayEvent | None] | None:
+    """The strip data: one winning human event per day, oldest first.
+
+    None when the events connection wasn't fetched. Bot actors are skipped;
+    events older than the window are dropped (a sparse fetch on a chatty PR
+    leaves older days quiet).
+    """
+    items = pr.get("timelineItems")
+    if not isinstance(items, dict) or now is None:
+        return None
+    today = now.astimezone(UTC).date()
+    winners: dict[int, tuple[int, datetime, DayEvent]] = {}
+    for node in connection_nodes(items):
+        event = _timeline_event(node)
+        if event is None:
+            continue
+        kind, raw_timestamp, author, review_state = event
+        if is_bot_actor(author):
+            continue
+        timestamp = parse_timestamp(raw_timestamp)
+        if timestamp is None:
+            continue
+        days_ago = (today - timestamp.astimezone(UTC).date()).days
+        if not 0 <= days_ago < TIMELINE_DAYS:
+            continue
+        login = author.get("login") if isinstance(author, dict) else None
+        mine: bool | None = None
+        if isinstance(login, str) and login and current_login is not None:
+            mine = login == current_login
+        candidate = (
+            _TIMELINE_RANK[kind],
+            timestamp,
+            DayEvent(kind=kind, review_state=review_state, mine=mine),
+        )
+        if days_ago not in winners or candidate[:2] >= winners[days_ago][:2]:
+            winners[days_ago] = candidate
+    return [
+        winners[d][2] if d in winners else None
+        for d in range(TIMELINE_DAYS - 1, -1, -1)
+    ]
+
+
 def has_conflicts(pr: dict[str, Any]) -> bool:
     return pr.get("mergeable") == "CONFLICTING"
 
@@ -405,6 +496,7 @@ def normalize_rows(
                 last_commit_days=channel_days["commit"],
                 last_review_days=channel_days["review"],
                 last_comment_days=channel_days["comment"],
+                timeline=timeline_buckets(pr, current_login, now),
                 has_conflicts=has_conflicts(pr),
                 mergeable_unknown=pr.get("mergeable") == "UNKNOWN",
                 check_state=check_state(pr),

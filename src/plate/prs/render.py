@@ -36,6 +36,8 @@ from plate.core.render import terminal_width as terminal_width
 from plate.core.render import truncate as truncate
 
 from .model import (
+    TIMELINE_DAYS,
+    DayEvent,
     PrRow,
     PrSummary,
     pr_state,
@@ -75,6 +77,36 @@ CHECK_COLORS = {
     "failure": SOFT_ROSE,
     "pending": SOFT_GOLD,
 }
+
+# The --timeline strip: one cell per day, rightmost = today. Your own events
+# are dim (nothing to chase); theirs take gold, or the review verdict's colour.
+TIMELINE_GLYPHS = {"commit": "◆", "review": "▲", "comment": "●"}
+
+
+def _timeline_color(event: DayEvent) -> str:
+    if event.mine is not False:
+        return DIM
+    if event.kind == "review" and event.review_state == "CHANGES_REQUESTED":
+        return SOFT_ROSE
+    if event.kind == "review" and event.review_state == "APPROVED":
+        return SOFT_GREEN
+    return SOFT_GOLD
+
+
+def _timeline_subline(row: PrRow, use_color: bool) -> str:
+    """The strip under one row: dim ``↳`` under the PR number, cells under Title."""
+    muted = sort_group(row) == 2
+    cc = use_color and not muted
+    cells = []
+    for event in row.timeline or [None] * TIMELINE_DAYS:
+        if event is None:
+            cells.append(dim("·", cc))
+        else:
+            cells.append(
+                colorize(TIMELINE_GLYPHS[event.kind], _timeline_color(event), cc)
+            )
+    line = "   " + dim("↳", cc) + " " * 7 + "".join(cells)
+    return dim(line, use_color) if muted else line
 
 # The single source of truth for the terminal layout: Title is elastic and
 # sized to the terminal width by :func:`_columns`; every other column is fixed.
@@ -229,7 +261,10 @@ def _pr_row_line(
 
 
 def terminal_table(
-    rows: list[PrRow], use_color: bool, use_links: bool = False
+    rows: list[PrRow],
+    use_color: bool,
+    use_links: bool = False,
+    show_timeline: bool = False,
 ) -> str:
     """The terminal PR table: bold header, labelled group dividers, one row each.
 
@@ -238,6 +273,7 @@ def terminal_table(
     decides, this just accepts the flag). Rows are sorted into the yours /
     to-review / the-rest groups; each group opens with a divider carrying its
     label and count, and the-rest rows are rendered plain then dimmed whole.
+    ``show_timeline`` adds each row's activity-strip sub-line.
     """
     columns = _columns(terminal_width())
     width_by = {name: w for name, w, _ in columns}
@@ -258,6 +294,8 @@ def terminal_table(
         lines.append(
             _pr_row_line(row, columns, width_by, gap, use_color, use_links)
         )
+        if show_timeline:
+            lines.append(_timeline_subline(row, use_color))
 
     return "\n".join(line.rstrip() for line in lines)
 
@@ -313,12 +351,13 @@ def summary_line(summary: PrSummary) -> str:
     return " · ".join(parts)
 
 
-def symbol_key(use_color: bool) -> str:
+def symbol_key(use_color: bool, show_timeline: bool = False) -> str:
     """The ``--show-key`` text: the states, the CI glyphs, and the dimming note.
 
     Matches the issues views' key idiom (bold ``Key``, aligned label columns, a
     trailing dim note); glyphs are tinted with their real colours so the key
-    teaches both symbol and colour at once.
+    teaches both symbol and colour at once. ``show_timeline`` adds the strip's
+    vocabulary.
     """
     state_order = ["conflict", "waiting", "ready", "unknown", "draft"]
     states = "   ".join(
@@ -331,19 +370,34 @@ def symbol_key(use_color: bool) -> str:
         f"{colorize(CHECK_LABELS[key], CHECK_COLORS[key], use_color)} {label}"
         for key, label in ci_order
     )
-    return "\n".join(
-        [
-            bold("Key", use_color),
-            "  State   " + states,
-            "  CI      " + ci,
-            dim(
-                "  Age = days open · Last = days since last human move · "
-                "bright Last = their move, yours to answer",
-                use_color,
-            ),
-            dim("  Last in rose = stale · dimmed rows = settled", use_color),
-        ]
+    lines = [
+        bold("Key", use_color),
+        "  State   " + states,
+        "  CI      " + ci,
+    ]
+    if show_timeline:
+        strip = "   ".join(
+            f"{colorize(TIMELINE_GLYPHS[kind], SOFT_GOLD, use_color)} {kind}"
+            for kind in ("commit", "comment", "review")
+        )
+        lines.append("  Strip   " + strip + "   " + dim("· quiet day", use_color))
+    lines.append(
+        dim(
+            "  Age = days open · Last = days since last human move · "
+            "bright Last = their move, yours to answer",
+            use_color,
+        )
     )
+    if show_timeline:
+        lines.append(
+            dim(
+                "  Strip: bright = them, dim = you · "
+                f"{TIMELINE_DAYS} days, right edge = today",
+                use_color,
+            )
+        )
+    lines.append(dim("  Last in rose = stale · dimmed rows = settled", use_color))
+    return "\n".join(lines)
 
 
 def owner_key(use_color: bool) -> str:

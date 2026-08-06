@@ -382,3 +382,34 @@ def test_pr_owner_query_carries_repository_and_pr_fields() -> None:
         "latestOpinionatedReviews", "reviewRequests", "statusCheckRollup",
     ):
         assert field in github.PR_OWNER_QUERY
+
+
+# --- timeline query variant -----------------------------------------------------
+
+
+def test_plain_query_carries_no_timeline_fields() -> None:
+    assert "timelineItems" not in github.PR_QUERY
+    assert "__EXTRA_FIELDS__" not in github.PR_QUERY
+
+
+def test_timeline_query_only_adds_the_events_connection() -> None:
+    assert "timelineItems" in github.PR_TIMELINE_QUERY
+    assert "__EXTRA_FIELDS__" not in github.PR_TIMELINE_QUERY
+    stripped = github.PR_TIMELINE_QUERY.replace(github.TIMELINE_FIELDS + "\n", "")
+    assert stripped == github.PR_QUERY
+
+
+def test_fetch_prs_and_viewer_timeline_flag_picks_the_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        captured["args"] = args
+        return subprocess.CompletedProcess(args, 0, stdout=page("simon", []), stderr="")
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    github.fetch_prs_and_viewer("an-org/a-repo", 10)
+    assert not any("timelineItems" in arg for arg in captured["args"])
+    github.fetch_prs_and_viewer("an-org/a-repo", 10, timeline=True)
+    assert any("timelineItems" in arg for arg in captured["args"])

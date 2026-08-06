@@ -614,3 +614,93 @@ def test_owner_key_teaches_repo_grouping_and_dimming() -> None:
 
 def test_owner_key_plain_when_color_disabled() -> None:
     assert "\033[" not in render.owner_key(use_color=False)
+
+
+# --- timeline sub-line ----------------------------------------------------------
+
+
+NOW = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
+
+
+def _commit_event(timestamp: str, login: str | None) -> dict[str, object]:
+    return {
+        "__typename": "PullRequestCommit",
+        "commit": {
+            "committedDate": timestamp,
+            "author": {"user": {"login": login} if login else None},
+        },
+    }
+
+
+def _review_event(
+    timestamp: str, login: str, state: str = "COMMENTED"
+) -> dict[str, object]:
+    return {
+        "__typename": "PullRequestReview",
+        "submittedAt": timestamp,
+        "state": state,
+        "author": {"login": login, "__typename": "User"},
+    }
+
+
+def _with_timeline(
+    node: dict[str, object], events: list[dict[str, object]]
+) -> dict[str, object]:
+    return {**node, "timelineItems": {"nodes": events}}
+
+
+def test_subline_appears_only_when_show_timeline() -> None:
+    rows = rows_for(pr(1, "Mine", ["simon"]))
+    assert "↳" not in render.terminal_table(rows, use_color=False)
+    out = render.terminal_table(rows, use_color=False, show_timeline=True)
+    assert out.count("↳") == 1
+
+
+def test_subline_geometry() -> None:
+    # Dim connector under the PR number, one cell per day starting at Title.
+    rows = rows_for(pr(1, "Mine", ["simon"]))
+    out = render.terminal_table(rows, use_color=False, show_timeline=True)
+    subline = next(line for line in out.splitlines() if "↳" in line)
+    assert subline.index("↳") == 3
+    assert visible_length(subline) == 11 + model.TIMELINE_DAYS
+    assert subline.endswith("·" * model.TIMELINE_DAYS)
+
+
+def test_subline_glyphs_carry_actor_and_verdict_colours() -> None:
+    node = _with_timeline(
+        pr(1, "Active", ["simon"]),
+        [
+            _commit_event(_iso(NOW, 5), "simon"),
+            _commit_event(_iso(NOW, 4), "alice"),
+            _review_event(_iso(NOW, 2), "alice", state="CHANGES_REQUESTED"),
+            _review_event(_iso(NOW, 1), "alice", state="APPROVED"),
+        ],
+    )
+    out = render.terminal_table(
+        rows_for(node, now=NOW), use_color=True, show_timeline=True
+    )
+    assert f"{DIM}◆{RESET}" in out  # your commit
+    assert f"{SOFT_GOLD}◆{RESET}" in out  # their commit
+    assert f"{SOFT_ROSE}▲{RESET}" in out  # changes requested
+    assert f"{SOFT_GREEN}▲{RESET}" in out  # approval
+
+
+def test_subline_of_muted_row_is_dimmed_whole() -> None:
+    node = _with_timeline(
+        pr(1, "Settled", ["bob"], review_decision="APPROVED"),
+        [_commit_event(_iso(NOW, 1), "bob")],
+    )
+    out = render.terminal_table(
+        rows_for(node, now=NOW), use_color=True, show_timeline=True
+    )
+    subline = next(line for line in out.splitlines() if "↳" in line)
+    assert subline.startswith(DIM)
+    assert SOFT_GOLD not in subline
+
+
+def test_key_teaches_strip_only_with_timeline() -> None:
+    assert "Strip" not in render.symbol_key(use_color=False)
+    key = render.symbol_key(use_color=False, show_timeline=True)
+    assert "Strip" in key
+    assert "right edge = today" in key
+    assert "\033[" not in key

@@ -24,7 +24,10 @@ from plate.core import gh
 # The last-activity signal reads one trailing event per channel: the head
 # commit, `reviews(last: 1)` — not latestOpinionatedReviews, so comment-only
 # reviews count — and `comments(last: 1)`. createdAt anchors the Age column.
-PR_QUERY = """
+#
+# The template's __EXTRA_FIELDS__ slot lets the --timeline variant add its
+# per-node events connection; the plain query carries no trace of it.
+_PR_QUERY_TEMPLATE = """
 query($owner: String!, $name: String!, $pageSize: Int!, $endCursor: String) {
   viewer { login }
   repository(owner: $owner, name: $name) {
@@ -67,12 +70,38 @@ query($owner: String!, $name: String!, $pageSize: Int!, $endCursor: String) {
             }
           }
         }
+__EXTRA_FIELDS__
       }
       pageInfo { hasNextPage endCursor }
     }
   }
 }
 """
+
+# The --timeline strip needs event history, not just each channel's trailing
+# item. 30 events cover a 28-day window for all but the chattiest PRs; older
+# days beyond the fetched events simply render quiet.
+TIMELINE_FIELDS = """\
+        timelineItems(
+          last: 30
+          itemTypes: [PULL_REQUEST_COMMIT, PULL_REQUEST_REVIEW, ISSUE_COMMENT]
+        ) {
+          nodes {
+            __typename
+            ... on PullRequestCommit {
+              commit { committedDate author { user { login } } }
+            }
+            ... on PullRequestReview {
+              submittedAt state author { login __typename }
+            }
+            ... on IssueComment {
+              createdAt author { login __typename }
+            }
+          }
+        }"""
+
+PR_QUERY = _PR_QUERY_TEMPLATE.replace("__EXTRA_FIELDS__\n", "")
+PR_TIMELINE_QUERY = _PR_QUERY_TEMPLATE.replace("__EXTRA_FIELDS__", TIMELINE_FIELDS)
 
 
 # The owner-wide view (issue #54) is a single owner-scoped search rather than a
@@ -232,10 +261,11 @@ def merge_graphql_pages(
 # connection here vs. a top-level search there), and the issue #62 port's job
 # is parity with gh-pr-status, not unifying the two pagination strategies.
 def fetch_prs_and_viewer(
-    repo: str, limit: int
+    repo: str, limit: int, *, timeline: bool = False
 ) -> tuple[str | None, list[dict[str, Any]]]:
     """One GraphQL round trip for the viewer login and all open PRs in ``repo``.
 
+    ``timeline`` opts into the heavier per-node events connection.
     Raises :class:`~plate.core.gh.PlateError` when ``repo`` isn't shaped like
     ``OWNER/REPO``, when ``gh`` fails, or when its output can't be parsed.
     """
@@ -248,7 +278,7 @@ def fetch_prs_and_viewer(
         command.append("--paginate")
     command += [
         "-f",
-        f"query={PR_QUERY}",
+        f"query={PR_TIMELINE_QUERY if timeline else PR_QUERY}",
         "-F",
         f"owner={owner}",
         "-F",

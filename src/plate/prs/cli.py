@@ -86,6 +86,13 @@ def _add_prs_flags(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--timeline",
+        action="store_true",
+        help="Show a per-PR activity strip of the last 28 days under each "
+        "row (repo view, terminal format only; ignored with --format "
+        "markdown).",
+    )
+    parser.add_argument(
         "--show-key",
         action="store_true",
         help="Print a key explaining the symbols above the table.",
@@ -117,6 +124,11 @@ def run(args: argparse.Namespace) -> int:
             "open PR grouped into yours / to review / the rest, so --mine on its "
             "own would do nothing."
         )
+    if args.timeline and args.owner:
+        raise PlateError(
+            "--timeline is only available in the repo view: two lines per PR "
+            "is too heavy for an owner-wide table."
+        )
 
     if args.owner:
         # The owner view is not tied to a checkout, so it must not require a git
@@ -128,7 +140,9 @@ def run(args: argparse.Namespace) -> int:
 
 
 def _run_repo(args: argparse.Namespace, repo: str) -> int:
-    login, prs = github.fetch_prs_and_viewer(repo, args.limit)
+    # The strip is terminal-only, so markdown never pays for the events fetch.
+    timeline = args.timeline and args.format == "terminal"
+    login, prs = github.fetch_prs_and_viewer(repo, args.limit, timeline=timeline)
 
     if not prs:
         print(f"No open PRs found for {repo}.")
@@ -143,13 +157,20 @@ def _run_repo(args: argparse.Namespace, repo: str) -> int:
     else:
         use_color = _use_color(args)
         if args.show_key:
-            print(render.symbol_key(use_color))
+            print(render.symbol_key(use_color, show_timeline=timeline))
             print()
         print(render.summary_line(summary_counts(rows)))
         print()
         # Hyperlinks are orthogonal to colour: emit them for interactive
         # terminals, never into pipes or files.
-        print(render.terminal_table(rows, use_color, use_links=sys.stdout.isatty()))
+        print(
+            render.terminal_table(
+                rows,
+                use_color,
+                use_links=sys.stdout.isatty(),
+                show_timeline=timeline,
+            )
+        )
 
     if len(prs) == args.limit:
         print(
