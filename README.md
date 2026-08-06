@@ -116,6 +116,7 @@ plate prs --format markdown
 plate prs --color never
 plate prs --stale-days 7
 plate prs --show-key
+plate prs --timeline          # per-PR activity strip (see below)
 plate prs --owner my-org      # every open PR across an owner (see below)
 ```
 
@@ -161,6 +162,25 @@ The remaining columns carry the detail:
   non-health tint.
 
 Settled PRs in "the rest" are dimmed so your attention lands on what's live.
+
+### The activity strip (`plate prs --timeline`)
+
+`--timeline` adds a sub-line under each row: the last 28 days of human
+activity, one cell per day, rightmost = today.
+
+```
+•  #81   feat: lag-days columns …   me    1w    2d  changes req  ✓    5
+   ↳     ····················◆◆·●·▲··
+```
+
+`◆` commit, `●` comment, `▲` review, `·` quiet day. Your own events are
+dimmed; other people's take gold — or the review verdict's colour (rose =
+changes requested, green = approved). Bot activity never appears, so a
+release-please or renovate PR shows an all-quiet strip. The row already says
+who moved last and how long ago (the Last column); the strip adds the shape —
+the rhythm and the silence. It needs event history, so the flag opts into a
+heavier query; it applies to the repo view's terminal format only (ignored
+with `--format markdown`, rejected with `--owner`).
 
 In terminals that support OSC 8 hyperlinks (iTerm2, Kitty, WezTerm, VS Code,
 and most modern emulators), the PR number is clickable and opens the PR on

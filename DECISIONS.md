@@ -312,6 +312,45 @@ counted — `timelineItems` was rejected as heavier for marginal coverage.
 
 ---
 
+## D12 — `--timeline`: a strip-only sub-line, opt-in payload (issue #80)
+
+**Decision:** `plate prs --timeline` adds one sub-line per row: a 28-day
+activity strip (one cell per UTC day, rightmost = today) starting at the Title
+column, bound to its row by a dim `↳` under the PR number. Vocabulary: `◆`
+commit, `●` comment, `▲` review, `·` quiet day; your own events dim, other
+people's gold — or the review verdict's colour (rose = changes requested,
+green = approved). Within a day, one glyph wins by review > commit > comment
+precedence (rank ties go to the later event). The events connection
+(`timelineItems(last: 30)`, three item types) is added to the query **only
+when the flag is set**; flag-off output and query are unchanged. Repo view,
+terminal format only: `--format markdown` ignores the flag (documented in
+``--help``), `--owner` rejects it. Bots are skipped via the shared
+`is_bot_actor`, so a bot-only PR shows an all-quiet strip; muted rows dim
+their sub-line whole.
+
+**Why:** The Age/Last columns (D11) say who moved last and how long ago; the
+strip answers the question they can't — "what has the rhythm been, and where's
+the silence?" **Strip-only** is the load-bearing choice: earlier drafts paired
+the strip with a plain-language annotation ("alice requested changes 2d ago"),
+but the text duplicated D11's columns and every rendering of it fought the
+table's idioms — dim text dissolved among dim columns, full weight scanned as
+another PR row. Deleting it fixed what styling couldn't. A 14-wide `Activity`
+*column* was also sketched and rejected: it pushed the table to 122 columns.
+An opt-in flag pays the heavier fetch only when asked — the same
+view-costs-what-it-shows stance as D6's single board query.
+
+**Consequence:** The PR query becomes a template with an `__EXTRA_FIELDS__`
+slot; `PR_QUERY` (slot empty) stays byte-identical to before, and
+`PR_TIMELINE_QUERY` fills it with the events connection. `PrRow` gains
+`timeline` (day buckets, oldest first, None when not fetched); `DayEvent`
+carries kind/review-state/viewer-relative direction. **Accepted limits:** a
+very chatty PR's 30-event fetch may not reach the window's left edge (older
+days render falsely quiet), day buckets are UTC (a late-evening local commit
+can land on "tomorrow"), and `committedDate` carries rebased-old dates as in
+D11.
+
+---
+
 ## Standing decisions carried from the architecture discussion
 
 - **Standalone, not a shared package.** The GraphQL fetch layer is specific enough

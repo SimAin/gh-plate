@@ -54,8 +54,10 @@ def _stub_fetch(
     """Wire the prs path's fetch to an in-memory stub; record its arguments."""
     calls: dict[str, Any] = {}
 
-    def fake_fetch(repo: str, limit: int) -> tuple[str | None, list[dict[str, Any]]]:
-        calls.update(repo=repo, limit=limit)
+    def fake_fetch(
+        repo: str, limit: int, *, timeline: bool = False
+    ) -> tuple[str | None, list[dict[str, Any]]]:
+        calls.update(repo=repo, limit=limit, timeline=timeline)
         return login, prs
 
     monkeypatch.setattr(github, "fetch_prs_and_viewer", fake_fetch)
@@ -213,7 +215,9 @@ def test_no_missing_login_note_when_login_known(monkeypatch, capsys) -> None:
 
 
 def test_gh_failure_surfaces_as_plate_error(monkeypatch) -> None:
-    def fake_fetch(repo: str, limit: int) -> tuple[str | None, list[dict[str, Any]]]:
+    def fake_fetch(
+        repo: str, limit: int, *, timeline: bool = False
+    ) -> tuple[str | None, list[dict[str, Any]]]:
         raise PlateError("gh failed to fetch open PRs for acme/widget:\nboom")
 
     monkeypatch.setattr(github, "fetch_prs_and_viewer", fake_fetch)
@@ -448,3 +452,66 @@ def test_owner_summary_line_present(monkeypatch, capsys) -> None:
     out = capsys.readouterr().out
     assert "2 open" in out
     assert "1 to review" in out
+
+
+# --- timeline (--timeline) ------------------------------------------------------
+
+
+def test_timeline_flag_reaches_fetch_and_output(monkeypatch, capsys) -> None:
+    calls = _stub_fetch(
+        monkeypatch, prs=[_pr(1, "Mine", author="simon")], login="simon"
+    )
+    assert (
+        cli.main(["prs", "--repo", "acme/widget", "--timeline", "--color", "never"])
+        == 0
+    )
+    assert calls["timeline"] is True
+    assert "↳" in capsys.readouterr().out
+
+
+def test_timeline_off_by_default(monkeypatch, capsys) -> None:
+    calls = _stub_fetch(
+        monkeypatch, prs=[_pr(1, "Mine", author="simon")], login="simon"
+    )
+    assert cli.main(["prs", "--repo", "acme/widget", "--color", "never"]) == 0
+    assert calls["timeline"] is False
+    assert "↳" not in capsys.readouterr().out
+
+
+def test_timeline_ignored_for_markdown(monkeypatch, capsys) -> None:
+    calls = _stub_fetch(
+        monkeypatch, prs=[_pr(1, "Mine", author="simon")], login="simon"
+    )
+    assert (
+        cli.main(
+            ["prs", "--repo", "acme/widget", "--timeline", "--format", "markdown"]
+        )
+        == 0
+    )
+    assert calls["timeline"] is False
+    assert "↳" not in capsys.readouterr().out
+
+
+def test_timeline_with_owner_errors() -> None:
+    with pytest.raises(PlateError) as excinfo:
+        prs_cli.run(cli.parse_args(["prs", "--owner", "an-org", "--timeline"]))
+    assert "only available in the repo view" in str(excinfo.value)
+
+
+def test_show_key_teaches_strip_with_timeline(monkeypatch, capsys) -> None:
+    _stub_fetch(monkeypatch, prs=[_pr(1, "Mine", author="simon")], login="simon")
+    assert (
+        cli.main(
+            [
+                "prs",
+                "--repo",
+                "acme/widget",
+                "--timeline",
+                "--show-key",
+                "--color",
+                "never",
+            ]
+        )
+        == 0
+    )
+    assert "Strip" in capsys.readouterr().out

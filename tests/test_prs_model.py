@@ -569,3 +569,128 @@ def test_group_by_repo_rows_keep_fetch_order_within_a_repo() -> None:
 
 def test_group_by_repo_empty_rows_yield_no_sections() -> None:
     assert model.group_by_repo([]) == []
+
+
+# --- timeline buckets -----------------------------------------------------------
+
+
+NOW = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
+
+
+def commit_event(timestamp: str, login: str | None) -> dict[str, object]:
+    return {
+        "__typename": "PullRequestCommit",
+        "commit": {
+            "committedDate": timestamp,
+            "author": {"user": {"login": login} if login else None},
+        },
+    }
+
+
+def review_event(
+    timestamp: str, login: str, state: str = "COMMENTED", author_type: str = "User"
+) -> dict[str, object]:
+    return {
+        "__typename": "PullRequestReview",
+        "submittedAt": timestamp,
+        "state": state,
+        "author": {"login": login, "__typename": author_type},
+    }
+
+
+def comment_event(
+    timestamp: str, login: str, author_type: str = "User"
+) -> dict[str, object]:
+    return {
+        "__typename": "IssueComment",
+        "createdAt": timestamp,
+        "author": {"login": login, "__typename": author_type},
+    }
+
+
+def buckets(events: list[dict[str, object]]) -> list[model.DayEvent | None] | None:
+    node = {**pr(1, "x", ["alice"]), "timelineItems": {"nodes": events}}
+    return model.normalize_rows([node], "simon", now=NOW)[0].timeline
+
+
+def test_timeline_none_when_not_fetched() -> None:
+    rows = model.normalize_rows([pr(1, "x")], "simon", now=NOW)
+    assert rows[0].timeline is None
+
+
+def test_timeline_buckets_by_day_oldest_first() -> None:
+    line = buckets(
+        [commit_event(_iso(NOW, 3), "alice"), comment_event(_iso(NOW, 0), "simon")]
+    )
+    assert line is not None
+    assert len(line) == model.TIMELINE_DAYS
+    assert line[-1] == model.DayEvent(kind="comment", review_state=None, mine=True)
+    assert line[-4] == model.DayEvent(kind="commit", review_state=None, mine=False)
+    assert sum(1 for event in line if event) == 2
+
+
+def test_timeline_window_edges() -> None:
+    too_old = buckets([commit_event(_iso(NOW, model.TIMELINE_DAYS), "alice")])
+    assert too_old is not None
+    assert all(event is None for event in too_old)
+    oldest_kept = buckets(
+        [commit_event(_iso(NOW, model.TIMELINE_DAYS - 1), "alice")]
+    )
+    assert oldest_kept is not None
+    assert oldest_kept[0] is not None
+
+
+def test_timeline_day_precedence_review_beats_commit_beats_comment() -> None:
+    same_day = _iso(NOW, 2)
+    line = buckets(
+        [
+            comment_event(same_day, "alice"),
+            review_event(same_day, "alice", state="CHANGES_REQUESTED"),
+            commit_event(same_day, "alice"),
+        ]
+    )
+    assert line is not None
+    event = line[-3]
+    assert event is not None
+    assert event.kind == "review"
+    assert event.review_state == "CHANGES_REQUESTED"
+
+
+def test_timeline_same_rank_tie_keeps_the_later_event() -> None:
+    earlier = (NOW - timedelta(days=1, hours=2)).isoformat().replace("+00:00", "Z")
+    later = (NOW - timedelta(days=1, hours=1)).isoformat().replace("+00:00", "Z")
+    line = buckets(
+        [
+            review_event(later, "alice", state="APPROVED"),
+            review_event(earlier, "alice", state="CHANGES_REQUESTED"),
+        ]
+    )
+    assert line is not None
+    event = line[-2]
+    assert event is not None
+    assert event.review_state == "APPROVED"
+
+
+def test_timeline_bot_events_are_skipped() -> None:
+    line = buckets(
+        [
+            comment_event(_iso(NOW, 1), "some-ci[bot]"),
+            review_event(_iso(NOW, 1), "quiet-ci", author_type="Bot"),
+        ]
+    )
+    assert line is not None
+    assert all(event is None for event in line)
+
+
+def test_timeline_direction_is_viewer_relative() -> None:
+    line = buckets(
+        [
+            commit_event(_iso(NOW, 2), "simon"),
+            commit_event(_iso(NOW, 1), "alice"),
+            commit_event(_iso(NOW, 0), None),
+        ]
+    )
+    assert line is not None
+    assert line[-3] is not None and line[-3].mine is True
+    assert line[-2] is not None and line[-2].mine is False
+    assert line[-1] is not None and line[-1].mine is None
