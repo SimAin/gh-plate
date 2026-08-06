@@ -273,6 +273,45 @@ stays (it serves statusOrder matching, #7); its retirement is a follow-up.
 
 ---
 
+## D11 — PR Age/Last columns: whose move is it, carried by weight (issue #79)
+
+**Decision:** The PR views' `Age` column is redefined to **days since
+`createdAt`** (total time in flight — context, always dim), and a new 4-wide
+**`Last`** column shows **days since the last *human* activity**, taken as the
+max across three channels: the head commit's `committedDate` (already fetched
+for the CI rollup), `reviews(last: 1)`, and `comments(last: 1)`. Direction is
+viewer-relative and carried by **weight, not colour**: `Last` renders full
+weight when the other side moved last (the days are *your* lag — respond on
+your PR, review on a to-review PR) and dim when you moved last. Rose still
+outranks weight for stale, and staleness now anchors on the last human move
+rather than `updatedAt`. Bot actors (the D-bot conventions plus GitHub's own
+`Bot` type) never count as activity; a bot-only PR falls back to `updatedAt`,
+dim, with no direction claimed. The summary line gains `N your move`; the
+markdown table carries both columns with direction in the Signal column.
+
+**Why:** `updatedAt` was a blunt staleness proxy — it bumps on label churn and
+is directionless: `2d` on your PR reads identically whether a reviewer
+requested changes 2 days ago (you owe a response) or you pushed a fix (they
+owe a review). The two questions worth answering are "how long since the last
+move?" and "whose move is next?" — together, the waiting-on signal.
+`reviews(last: 1)` is deliberately not `latestOpinionatedReviews`: a
+comment-only review (an inline-feedback batch) is real activity. Weight over a
+new hue keeps the colour budget rationed to health; a `2d ⇠them` text variant
+was mocked and rejected as +5 columns on a table already flagged as tight.
+
+**Consequence:** Both queries gain `createdAt` and the two trailing-event
+connections (same round trip); `PrRow` gains `last_activity_days` /
+`last_activity_mine` (`None` = no direction claimed: bot-only fallback,
+missing commit author login, or unknown viewer) plus the per-channel lags
+(`last_commit_days` / `last_review_days` / `last_comment_days`) — kept even
+though the views render only their max, so a smarter court heuristic (the
+accepted "ping problem": your own nudge comment flips `Last` to dim) needs no
+refetch. **Known caveats, accepted:** `committedDate` survives rebases with
+old dates, and timeline-only events (force-pushes, review requests) are not
+counted — `timelineItems` was rejected as heavier for marginal coverage.
+
+---
+
 ## Standing decisions carried from the architecture discussion
 
 - **Standalone, not a shared package.** The GraphQL fetch layer is specific enough

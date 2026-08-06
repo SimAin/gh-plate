@@ -39,12 +39,28 @@ def pr(
     comments: int = 0,
     latest_reviews: list[dict[str, object]] | None = None,
     author: str | None = None,
+    created_at: str | None = None,
     updated_at: str | None = None,
     mergeable: str | None = None,
     rollup: str | None = None,
     author_type: str = "User",
+    last_commit: tuple[str, str | None] | None = None,
+    last_review: tuple[str, str] | None = None,
+    last_comment: tuple[str, str] | None = None,
 ) -> dict[str, object]:
-    """A PR node in the GraphQL shape the fetch layer produces."""
+    """A PR node in the GraphQL shape the fetch layer produces.
+
+    ``last_commit``/``last_review``/``last_comment`` are ``(timestamp, login)``
+    pairs for the trailing event per channel — the last-activity shape (#79).
+    """
+    commit: dict[str, object] = {
+        "statusCheckRollup": {"state": rollup} if rollup else None
+    }
+    if last_commit:
+        commit["committedDate"] = last_commit[0]
+        commit["author"] = {
+            "user": {"login": last_commit[1]} if last_commit[1] else None
+        }
     return {
         "number": number,
         "url": f"https://github.com/acme/widget/pull/{number}",
@@ -55,18 +71,31 @@ def pr(
         "latestReviews": {"nodes": latest_reviews or []},
         "reviewRequests": {"nodes": []},
         "author": {"login": author, "__typename": author_type} if author else None,
+        "createdAt": created_at,
         "updatedAt": updated_at,
         "mergeable": mergeable,
         "totalCommentsCount": comments,
-        "commits": {
+        "reviews": {
             "nodes": [
                 {
-                    "commit": {
-                        "statusCheckRollup": {"state": rollup} if rollup else None
-                    }
+                    "submittedAt": last_review[0],
+                    "author": {"login": last_review[1], "__typename": "User"},
                 }
             ]
+            if last_review
+            else []
         },
+        "comments": {
+            "nodes": [
+                {
+                    "createdAt": last_comment[0],
+                    "author": {"login": last_comment[1], "__typename": "User"},
+                }
+            ]
+            if last_comment
+            else []
+        },
+        "commits": {"nodes": [{"commit": commit}]},
     }
 
 
@@ -170,23 +199,69 @@ def test_review_shows_you_approved_when_i_reviewed() -> None:
     assert f"{SOFT_GREEN}you ✓{RESET}" in output
 
 
-# --- age / staleness ---------------------------------------------------------
+# --- age / last activity -----------------------------------------------------
 
 
-def test_stale_age_is_rose_fresh_is_dim() -> None:
+def _iso(now: datetime, days_ago: int) -> str:
+    return (now - timedelta(days=days_ago)).isoformat().replace("+00:00", "Z")
+
+
+def test_stale_last_is_rose_fresh_own_move_is_dim() -> None:
     now = datetime(2026, 6, 19, tzinfo=UTC)
-    fresh = (now - timedelta(days=2)).isoformat().replace("+00:00", "Z")
-    old = (now - timedelta(days=30)).isoformat().replace("+00:00", "Z")
     rows = rows_for(
-        pr(1, "Fresh", ["alice"], updated_at=fresh),
-        pr(2, "Stale", ["alice"], updated_at=old),
+        pr(1, "Fresh", ["alice"], last_commit=(_iso(now, 2), "simon")),
+        pr(2, "Stale", ["alice"], last_commit=(_iso(now, 30), "alice")),
         now=now,
         stale_days=14,
     )
     output = render.terminal_table(rows, use_color=True)
-    # A stale age is highlighted rose (4w for 30 days); a fresh one is dimmed.
+    # A stale Last is highlighted rose (4w for 30 days) even though the other
+    # side moved last; a fresh own-move Last is dimmed.
     assert f"{SOFT_ROSE}4w{RESET}" in output
     assert f"{DIM}2d{RESET}" in output
+
+
+def test_last_is_full_weight_when_their_move_dim_when_yours() -> None:
+    now = datetime(2026, 6, 19, tzinfo=UTC)
+    rows = rows_for(
+        pr(1, "Their move", ["simon"], last_review=(_iso(now, 2), "alice")),
+        pr(2, "Your move", ["simon"], last_commit=(_iso(now, 3), "simon")),
+        now=now,
+    )
+    output = render.terminal_table(rows, use_color=True)
+    # Their move: the lag is yours to answer — full weight, no styling at all.
+    assert f"{DIM}2d{RESET}" not in output
+    assert "2d" in output
+    # Your move: nothing to chase — dimmed like every other settled figure.
+    assert f"{DIM}3d{RESET}" in output
+
+
+def test_age_is_always_dim_context() -> None:
+    now = datetime(2026, 6, 19, tzinfo=UTC)
+    # 60 days open with a fresh move from the other side: Age must stay dim
+    # (tenure is context), only Last carries urgency.
+    rows = rows_for(
+        pr(
+            1,
+            "Old but active",
+            ["simon"],
+            created_at=_iso(now, 60),
+            last_review=(_iso(now, 1), "alice"),
+        ),
+        now=now,
+        stale_days=14,
+    )
+    output = render.terminal_table(rows, use_color=True)
+    assert f"{DIM}8w{RESET}" in output
+    assert f"{SOFT_ROSE}8w{RESET}" not in output
+
+
+def test_age_and_last_columns_align_in_header() -> None:
+    rows = rows_for(pr(1, "Mine", ["simon"]))
+    header = render.terminal_table(rows, use_color=False).splitlines()[0]
+    assert "Age" in header
+    assert "Last" in header
+    assert header.index("Age") < header.index("Last") < header.index("Review")
 
 
 # --- assignee column ---------------------------------------------------------
@@ -311,7 +386,9 @@ def test_the_rest_group_is_dimmed_whole() -> None:
 def test_terminal_layout_fills_the_terminal_exactly() -> None:
     # When Title is between its clamps, columns + gaps must total exactly the
     # terminal width — the invariant the elastic column exists to hold.
-    for width in (80, 100, 108):
+    # (Fixed columns + gaps total 65 since the Last column landed, so Title
+    # sits strictly between its 16/50 clamps for widths 82..114.)
+    for width in (90, 100, 108):
         columns = render._columns(width)
         total = sum(w for _, w, _ in columns) + render.COLUMN_GAP * (len(columns) - 1)
         title = {name: w for name, w, _ in columns}["Title"]
@@ -342,15 +419,19 @@ def test_comment_count_capped_at_99_plus() -> None:
 # --- summary line ------------------------------------------------------------
 
 
-def test_summary_line_reports_all_four_figures() -> None:
+def test_summary_line_reports_all_figures() -> None:
+    now = datetime(2026, 6, 19, tzinfo=UTC)
     rows = rows_for(
-        pr(1, "Mine", ["simon"]),
+        pr(1, "Mine", ["simon"], last_review=(_iso(now, 2), "alice")),
         pr(2, "To review", ["alice"]),
         pr(3, "Conflicting", ["alice"], mergeable="CONFLICTING"),
         pr(4, "Failing", ["bob"], review_decision="APPROVED", rollup="FAILURE"),
+        now=now,
     )
     line = render.summary_line(model.summary_counts(rows))
-    assert line == "4 open · 2 to review · 1 with conflicts · 1 failing CI"
+    assert line == (
+        "4 open · 2 to review · 1 with conflicts · 1 failing CI · 1 your move"
+    )
 
 
 def test_summary_line_suppresses_zero_counts() -> None:
@@ -369,6 +450,10 @@ def test_symbol_key_teaches_glyphs_and_colours() -> None:
     assert "pass" in key
     assert "fail" in key
     assert "stale" in key
+    # The Age/Last idiom has to be taught — weight is subtle (D11).
+    assert "days open" in key
+    assert "last human move" in key
+    assert "yours to answer" in key
     # Glyphs are tinted with their real colours so the key teaches both.
     assert f"{SOFT_GREEN}✓{RESET}" in key
     assert f"{SOFT_ROSE}⚠{RESET}" in key
@@ -389,19 +474,37 @@ def test_markdown_keeps_scan_signals() -> None:
     )
     output = render.markdown_table(rows)
     assert (
-        "| PR ID | Title | State | Assignee | Age | Review | CI | Comments | "
-        "Signal |"
+        "| PR ID | Title | State | Assignee | Age | Last | Review | CI | "
+        "Comments | Signal |"
     ) in output
     assert (
         "| [#1](https://github.com/acme/widget/pull/1) | Mine | "
-        "waiting | me |  | pending |  | 0 | mine |"
+        "waiting | me |  |  | pending |  | 0 | mine |"
     ) in output
     assert (
         "| [#2](https://github.com/acme/widget/pull/2) | To review | "
-        "waiting | alice |  | pending |  | 0 | To Review |"
+        "waiting | alice |  |  | pending |  | 0 | To Review |"
     ) in output
     # The release PR reads as "ready" only after approval; its signal is kept.
     assert "| Release PR |" in output
+
+
+def test_markdown_carries_your_move_in_signal_and_last_column() -> None:
+    now = datetime(2026, 6, 19, tzinfo=UTC)
+    rows = rows_for(
+        pr(
+            1,
+            "Alice reviewed",
+            ["simon"],
+            created_at=_iso(now, 7),
+            last_review=(_iso(now, 2), "alice"),
+        ),
+        now=now,
+    )
+    output = render.markdown_table(rows)
+    # Colour can't carry direction in markdown, so the Signal column does.
+    assert "| 7d | 2d |" in output
+    assert "mine, your move |" in output
 
 
 def test_markdown_escapes_pipes_in_cells() -> None:
@@ -502,6 +605,8 @@ def test_owner_key_teaches_repo_grouping_and_dimming() -> None:
     assert "Key" in key
     assert "grouped by repository" in key
     assert "neither yours nor to review" in key
+    assert "days open" in key
+    assert "last human move" in key
     for label in render.STATE_LABELS.values():
         assert label in key
     assert f"{SOFT_GREEN}✓{RESET}" in key

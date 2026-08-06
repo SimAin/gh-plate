@@ -144,8 +144,14 @@ reserved for what those columns don't cover.
 
 The remaining columns carry the detail:
 
-- **Age** — time since last update (e.g. `3d`, `4w`), shown rose once it passes
-  `--stale-days` (14 by default).
+- **Age** — time since the PR was opened (e.g. `3d`, `4w`) — total time in
+  flight. Context only, always dimmed.
+- **Last** — time since the last *human* move (a commit, review, or comment;
+  bot activity never counts). Its weight answers "whose move is next?": full
+  weight means the other side moved last and the days are **your** lag (on
+  your PR, respond; on a to-review PR, review); dimmed means you moved last —
+  nothing to chase. Rose once nobody has touched the PR in `--stale-days`
+  (14 by default). The summary line counts these as `N your move`.
 - **Review** — `approved`, `changes req`, `pending`, or `you ✓` when you have
   reviewed someone else's PR.
 - **CI** — the status-check rollup as ✓ / ✗ / •.

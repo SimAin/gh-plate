@@ -81,8 +81,8 @@ def _add_prs_flags(parser: argparse.ArgumentParser) -> None:
         type=_positive_int,
         default=DEFAULT_STALE_DAYS,
         help=(
-            "Flag a PR as stale when not updated in this many days. "
-            f"Defaults to {DEFAULT_STALE_DAYS}."
+            "Flag a PR as stale when nobody (human) has touched it in this "
+            f"many days. Defaults to {DEFAULT_STALE_DAYS}."
         ),
     )
     parser.add_argument(
