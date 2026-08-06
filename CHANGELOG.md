@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.2.1](https://github.com/SimAin/gh-plate/compare/v1.2.0...v1.2.1) (2026-08-06)
+
+
+### Bug Fixes
+
+* **config:** warn on unrecognised config keys ([002383f](https://github.com/SimAin/gh-plate/commit/002383fb2332916af02694a0cfb3755f3068db1d))
+* **config:** warn on unrecognised config keys ([4f50194](https://github.com/SimAin/gh-plate/commit/4f50194104fee1bd6827ac48523ef3420a4fd19b))
+* **core:** measure display columns, not code points, in width math ([b4ac872](https://github.com/SimAin/gh-plate/commit/b4ac872da7e2d5e00838b10e2bd0be12e1220cd4))
+* **core:** measure display columns, not code points, in width math ([23892d0](https://github.com/SimAin/gh-plate/commit/23892d0ce1625c2f13a9dd3c5f1496369c5cfb68))
+* **issues:** count unfetched labels in the +N overflow ([5e941f2](https://github.com/SimAin/gh-plate/commit/5e941f224d9066e02b941fc59180edeae9c8fe52))
+* **issues:** count unfetched labels in the +N overflow ([cba5d2a](https://github.com/SimAin/gh-plate/commit/cba5d2adf62e52419bc2bcef1364d319d297825e))
+* **issues:** strip hyphenated emoji shortcodes like :e-mail: ([cceab1f](https://github.com/SimAin/gh-plate/commit/cceab1fdf24cc7fa10b3ff6390edbcf665e9e5fa))
+* **issues:** strip hyphenated emoji shortcodes like :e-mail: ([b3d02d9](https://github.com/SimAin/gh-plate/commit/b3d02d9932bf790c55c1df0e3c59e0ca9f6fe6da))
+* **sprint:** surface missing read:project scope as an actionable error ([57a4257](https://github.com/SimAin/gh-plate/commit/57a42574658a8374a405f48f4e160851c842b6a1))
+* **sprint:** surface missing read:project scope as an actionable error ([2a34f15](https://github.com/SimAin/gh-plate/commit/2a34f15bf012c2e69e4daf7041484a98d54cc9f7))
+
 ## [1.2.0](https://github.com/SimAin/gh-plate/compare/v1.1.0...v1.2.0) (2026-07-21)
 
 
