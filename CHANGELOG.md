@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.0](https://github.com/SimAin/gh-plate/compare/v1.2.1...v1.3.0) (2026-08-06)
+
+
+### Features
+
+* **prs:** --timeline activity strip under each repo-view row ([0c92781](https://github.com/SimAin/gh-plate/commit/0c92781c1957cf355e65456125bc1d700689e778))
+* **prs:** --timeline activity strip under each repo-view row ([49912a0](https://github.com/SimAin/gh-plate/commit/49912a0a1a26d6d4922fe3c60a3e06c4caa73873))
+* **prs:** Age/Last columns — days open, last human move, whose-move signal ([5d92462](https://github.com/SimAin/gh-plate/commit/5d924620914fcd83422e59b57ed4de6f53fd7ec4))
+
 ## [1.2.1](https://github.com/SimAin/gh-plate/compare/v1.2.0...v1.2.1) (2026-08-06)
 
 
