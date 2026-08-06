@@ -577,3 +577,53 @@ def test_search_paginated_is_silent_when_stderr_is_not_a_tty(
     gh.search_paginated("QUERY", "q-str", 500, "acme")
 
     assert stderr.getvalue() == ""
+
+
+# --- fetch_sprint_items / fetch_project_fields: GraphQL error handling ------
+
+
+def test_fetch_sprint_items_insufficient_scopes_raises_actionable_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = json.dumps(
+        {"errors": [{"type": "INSUFFICIENT_SCOPES", "message": "missing scope"}]}
+    )
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout(payload))
+
+    with pytest.raises(gh.PlateError, match="read:project"):
+        github.fetch_sprint_items("acme", "organization", 2, "Iteration", "Status")
+
+    with pytest.raises(gh.PlateError, match="gh auth refresh -s read:project"):
+        github.fetch_sprint_items("acme", "organization", 2, "Iteration", "Status")
+
+
+def test_fetch_sprint_items_other_graphql_error_raises_generic_dump(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = json.dumps({"errors": [{"type": "NOT_FOUND", "message": "nope"}]})
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout(payload))
+
+    with pytest.raises(gh.PlateError, match="GraphQL error"):
+        github.fetch_sprint_items("acme", "organization", 2, "Iteration", "Status")
+
+
+def test_fetch_project_fields_insufficient_scopes_raises_actionable_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = json.dumps(
+        {"errors": [{"type": "INSUFFICIENT_SCOPES", "message": "missing scope"}]}
+    )
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout(payload))
+
+    with pytest.raises(gh.PlateError, match="gh auth refresh -s read:project"):
+        github.fetch_project_fields("acme", "organization", 2)
+
+
+def test_fetch_project_fields_other_graphql_error_raises_generic_dump(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = json.dumps({"errors": [{"type": "NOT_FOUND", "message": "nope"}]})
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout(payload))
+
+    with pytest.raises(gh.PlateError, match="GraphQL error"):
+        github.fetch_project_fields("acme", "organization", 2)

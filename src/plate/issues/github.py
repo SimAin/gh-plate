@@ -239,6 +239,18 @@ def sprint_filter(sprint_field: str) -> str:
 SPRINT_ITEM_CAP = 1000
 
 
+def _raise_for_graphql_errors(errors: list[dict[str, Any]]) -> None:
+    """Raise a friendly error for a missing ``read:project`` scope, else raw dump."""
+    for error in errors:
+        message = str(error.get("message", ""))
+        if error.get("type") == "INSUFFICIENT_SCOPES" or "read:project" in message:
+            raise gh.PlateError(
+                "Your gh token lacks the read:project scope needed for --sprint. "
+                "Run: gh auth refresh -s read:project"
+            )
+    raise gh.PlateError("GraphQL error: " + json.dumps(errors))
+
+
 def fetch_sprint_items(
     owner: str,
     owner_type: str,
@@ -273,7 +285,7 @@ def fetch_sprint_items(
         except json.JSONDecodeError as exc:
             raise gh.PlateError(f"Could not parse gh response: {exc}") from exc
         if payload.get("errors"):
-            raise gh.PlateError("GraphQL error: " + json.dumps(payload["errors"]))
+            _raise_for_graphql_errors(payload["errors"])
 
         root = (payload.get("data") or {}).get(root_key) or {}
         project = root.get("projectV2")
@@ -365,7 +377,7 @@ def fetch_project_fields(
     except json.JSONDecodeError as exc:
         raise gh.PlateError(f"Could not parse gh response: {exc}") from exc
     if payload.get("errors"):
-        raise gh.PlateError("GraphQL error: " + json.dumps(payload["errors"]))
+        _raise_for_graphql_errors(payload["errors"])
 
     root = (payload.get("data") or {}).get(root_key) or {}
     project = root.get("projectV2")
