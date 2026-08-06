@@ -1,10 +1,11 @@
 """Tests for plate.retro.cli and plate.retro.github — flags, dispatch, and
-the events fetch, with ``gh`` stubbed at the shared chokepoint."""
+the three activity fetches, with ``gh`` stubbed at the shared chokepoint."""
 
 from __future__ import annotations
 
 import json
 import subprocess
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -16,41 +17,131 @@ from plate.retro import github
 from plate.retro import model as retro_model
 
 
-def _event(days_note: str = "2026-06-19T10:00:00Z") -> dict[str, Any]:
-    return {"type": "PushEvent", "created_at": days_note, "payload": {}}
+def _iso(days_ago: int = 0) -> str:
+    stamp = datetime.now(UTC) - timedelta(days=days_ago)
+    return stamp.isoformat().replace("+00:00", "Z")
+
+
+def pr_item(repo: str = "acme/widget") -> dict[str, Any]:
+    return {
+        "repository_url": f"https://api.github.com/repos/{repo}",
+        "created_at": _iso(),
+    }
+
+
+def review_event(repo: str = "SimAin/toy") -> dict[str, Any]:
+    return {
+        "type": "PullRequestReviewEvent",
+        "repo": {"name": repo},
+        "created_at": _iso(),
+    }
+
+
+def push_event(repo: str = "acme/widget") -> dict[str, Any]:
+    return {
+        "type": "PushEvent",
+        "repo": {"name": repo},
+        "created_at": _iso(),
+        "payload": {"ref": "refs/heads/feat/x", "before": "a" * 8, "head": "b" * 8},
+    }
+
+
+def compare_payload(login: str = "simon") -> str:
+    return json.dumps(
+        {
+            "total_commits": 1,
+            "commits": [
+                {
+                    "sha": "c" * 8,
+                    "author": {"login": login},
+                    "commit": {"committer": {"date": _iso()}},
+                }
+            ],
+        }
+    )
 
 
 # --- fetch ---------------------------------------------------------------------
 
 
-def _paged_run(pages: list[list[dict[str, Any]]]) -> tuple[Any, list[list[str]]]:
-    calls: list[list[str]] = []
+def _paged_run(responses: list[str]) -> tuple[Any, list[str]]:
+    paths: list[str] = []
 
     def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
-        calls.append(args)
-        batch = pages[len(calls) - 1] if len(calls) <= len(pages) else []
-        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(batch), stderr="")
+        paths.append(args[-1])
+        body = responses[len(paths) - 1] if len(paths) <= len(responses) else "[]"
+        return subprocess.CompletedProcess(args, 0, stdout=body, stderr="")
 
-    return fake_run, calls
+    return fake_run, paths
 
 
-def test_fetch_stops_after_the_first_short_page(monkeypatch) -> None:
-    fake_run, calls = _paged_run([[_event()] * 3])
+def test_fetch_events_stops_after_the_first_short_page(monkeypatch) -> None:
+    fake_run, paths = _paged_run([json.dumps([review_event()] * 3)])
     monkeypatch.setattr(gh, "run_command", fake_run)
     events = github.fetch_events("simon")
     assert len(events) == 3
-    assert len(calls) == 1
-    assert "users/simon/events?per_page=100&page=1" in calls[0][-1]
+    assert paths == ["users/simon/events?per_page=100&page=1"]
 
 
-def test_fetch_walks_full_pages_up_to_the_cap(monkeypatch) -> None:
-    full = [_event()] * github.EVENTS_PER_PAGE
-    fake_run, calls = _paged_run([full, full, full])
+def test_fetch_events_walks_full_pages_up_to_the_cap(monkeypatch) -> None:
+    full = json.dumps([review_event()] * github.EVENTS_PER_PAGE)
+    fake_run, paths = _paged_run([full, full, full])
     monkeypatch.setattr(gh, "run_command", fake_run)
     events = github.fetch_events("simon")
     assert len(events) == github.EVENTS_FEED_CAP
     # never asks for a page past the cap — that is a hard API error
-    assert len(calls) == github.EVENTS_MAX_PAGES
+    assert len(paths) == github.EVENTS_MAX_PAGES
+
+
+def test_fetch_opened_builds_the_search_and_reports_totals(monkeypatch) -> None:
+    body = json.dumps({"total_count": 1, "items": [pr_item()]})
+    fake_run, paths = _paged_run([body])
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    items, total = github.fetch_opened("simon", "2026-06-06")
+    assert (len(items), total) == (1, 1)
+    assert paths[0].startswith(
+        "search/issues?q=author:simon+is:pr+created:>=2026-06-06"
+    )
+
+
+def test_search_pagination_stops_on_a_short_page(monkeypatch) -> None:
+    full_page = {"total_count": 150, "items": [pr_item()] * 100}
+    short_page = {"total_count": 150, "items": [pr_item()] * 50}
+    fake_run, paths = _paged_run([json.dumps(full_page), json.dumps(short_page)])
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    items, total = github.fetch_opened("simon", "2026-06-06")
+    assert len(items) == 150
+    assert total == 150
+    assert len(paths) == 2
+
+
+def test_fetch_compares_align_with_their_ranges(monkeypatch) -> None:
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        path = args[-1]
+        if "acme/widget" in path:
+            return subprocess.CompletedProcess(
+                args, 0, stdout=compare_payload(), stderr=""
+            )
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="404")
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    compares = github.fetch_compares(
+        [
+            ("acme/widget", "a" * 8, "b" * 8),
+            ("acme/gone", "x" * 8, "y" * 8),
+        ]
+    )
+    assert compares[0] is not None
+    assert compares[0]["total_commits"] == 1
+    assert compares[1] is None  # a failed compare falls back, never raises
+
+
+def test_fetch_compares_empty_ranges_make_no_calls(monkeypatch) -> None:
+    def boom(args: list[str]) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("no ranges means no requests")
+
+    monkeypatch.setattr(gh, "run_command", boom)
+    assert github.fetch_compares([]) == []
 
 
 def test_fetch_gh_failure_raises(monkeypatch) -> None:
@@ -71,7 +162,7 @@ def test_fetch_malformed_json_raises(monkeypatch) -> None:
         github.fetch_events("simon")
 
 
-def test_fetch_non_list_payload_raises(monkeypatch) -> None:
+def test_fetch_unexpected_payloads_raise(monkeypatch) -> None:
     def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             args, 0, stdout='{"message": "x"}', stderr=""
@@ -80,6 +171,8 @@ def test_fetch_non_list_payload_raises(monkeypatch) -> None:
     monkeypatch.setattr(gh, "run_command", fake_run)
     with pytest.raises(PlateError, match="unexpected events payload"):
         github.fetch_events("simon")
+    with pytest.raises(PlateError, match="unexpected search payload"):
+        github.fetch_opened("simon", "2026-06-06")
 
 
 # --- flags ---------------------------------------------------------------------
@@ -110,43 +203,68 @@ def test_days_bounds_accepted(days: str) -> None:
 
 def _stub(
     monkeypatch: pytest.MonkeyPatch,
-    events: list[dict[str, Any]],
+    *,
+    events: list[dict[str, Any]] | None = None,
+    compares: list[dict[str, Any] | None] | None = None,
+    prs: tuple[list[dict[str, Any]], int] = ([], 0),
     login: str | None = "simon",
 ) -> dict[str, Any]:
     calls: dict[str, Any] = {}
     monkeypatch.setattr(gh, "current_login", lambda: login)
+    monkeypatch.setattr(github, "fetch_events", lambda lg: events or [])
 
-    def fake_fetch(fetch_login: str) -> list[dict[str, Any]]:
-        calls["login"] = fetch_login
-        return events
+    def fake_compares(
+        ranges: list[tuple[str, str, str]],
+    ) -> list[dict[str, Any] | None]:
+        calls["ranges"] = ranges
+        return compares if compares is not None else [None] * len(ranges)
 
-    monkeypatch.setattr(github, "fetch_events", fake_fetch)
+    monkeypatch.setattr(github, "fetch_compares", fake_compares)
+
+    def fake_opened(
+        fetch_login: str, since: str
+    ) -> tuple[list[dict[str, Any]], int]:
+        calls.update(login=fetch_login, since=since)
+        return prs
+
+    monkeypatch.setattr(github, "fetch_opened", fake_opened)
     return calls
 
 
-def test_run_renders_the_panel(monkeypatch, capsys) -> None:
-    calls = _stub(monkeypatch, [])
+def test_run_renders_one_panel_per_owner(monkeypatch, capsys) -> None:
+    calls = _stub(
+        monkeypatch,
+        events=[push_event("acme/widget"), review_event("SimAin/toy")],
+        compares=[json.loads(compare_payload())],
+    )
     assert cli.main(["retro", "--color", "never"]) == 0
     out = capsys.readouterr().out
-    assert "── you · last 14 days " in out
-    assert "reviews" in out
-    assert "pushes" in out
-    assert "opened" in out
+    assert "── acme · last 14 days " in out
+    assert "── SimAin · last 14 days " in out
     assert calls["login"] == "simon"
+    assert len(calls["since"]) == 10  # YYYY-MM-DD
+    assert calls["ranges"] == [("acme/widget", "a" * 8, "b" * 8)]
 
 
 def test_run_days_reaches_the_window(monkeypatch, capsys) -> None:
-    _stub(monkeypatch, [])
+    _stub(monkeypatch, events=[review_event()])
     assert cli.main(["retro", "--days", "7", "--color", "never"]) == 0
-    assert "── you · last 7 days " in capsys.readouterr().out
+    assert "· last 7 days " in capsys.readouterr().out
+
+
+def test_run_empty_message(monkeypatch, capsys) -> None:
+    _stub(monkeypatch)
+    assert cli.main(["retro", "--color", "never"]) == 0
+    assert "No activity found in the last 14 days." in capsys.readouterr().out
 
 
 def test_run_markdown(monkeypatch, capsys) -> None:
-    _stub(monkeypatch, [])
+    _stub(monkeypatch, events=[review_event("acme/widget")])
     assert cli.main(["retro", "--format", "markdown"]) == 0
     out = capsys.readouterr().out
+    assert "## acme" in out
     assert "| Channel | Total | Last |" in out
-    assert "you · last" not in out
+    assert "last 14 days" not in out
 
 
 def test_run_never_touches_repo_resolution(monkeypatch, capsys) -> None:
@@ -154,30 +272,45 @@ def test_run_never_touches_repo_resolution(monkeypatch, capsys) -> None:
         raise AssertionError("retro must not resolve a repo")
 
     monkeypatch.setattr(gh, "current_repo", boom)
-    _stub(monkeypatch, [])
+    _stub(monkeypatch, events=[review_event()])
     assert cli.main(["retro", "--color", "never"]) == 0
 
 
 def test_run_missing_login_errors(monkeypatch, capsys) -> None:
-    _stub(monkeypatch, [], login=None)
+    _stub(monkeypatch, login=None)
     assert cli.main(["retro"]) == 1
     assert "GitHub login" in capsys.readouterr().err
+
+
+def test_run_warns_when_search_was_truncated(monkeypatch, capsys) -> None:
+    _stub(monkeypatch, prs=([pr_item()], 1500))
+    assert cli.main(["retro", "--color", "never"]) == 0
+    assert "counting 1 of 1500 PRs opened" in capsys.readouterr().err
 
 
 def test_run_warns_when_the_feed_cannot_cover_the_window(
     monkeypatch, capsys
 ) -> None:
-    from datetime import UTC, datetime
-
-    fresh = datetime.now(UTC).isoformat()
-    _stub(monkeypatch, [_event(fresh)] * github.EVENTS_FEED_CAP)
+    _stub(monkeypatch, events=[review_event()] * github.EVENTS_FEED_CAP)
     assert cli.main(["retro", "--color", "never"]) == 0
     err = capsys.readouterr().err
-    assert "most recent events" in err
+    assert "review and commit counts" in err
 
 
-def test_run_no_warning_when_the_feed_is_short(monkeypatch, capsys) -> None:
-    _stub(monkeypatch, [_event()])
+def test_run_warns_when_pushes_could_not_be_expanded(monkeypatch, capsys) -> None:
+    _stub(monkeypatch, events=[push_event()], compares=[None])
+    assert cli.main(["retro", "--color", "never"]) == 0
+    err = capsys.readouterr().err
+    assert "could not be expanded" in err
+
+
+def test_run_no_warnings_when_everything_is_covered(monkeypatch, capsys) -> None:
+    _stub(
+        monkeypatch,
+        events=[push_event()],
+        compares=[json.loads(compare_payload())],
+        prs=([pr_item()], 1),
+    )
     assert cli.main(["retro", "--color", "never"]) == 0
     assert "Note:" not in capsys.readouterr().err
 
@@ -185,9 +318,9 @@ def test_run_no_warning_when_the_feed_is_short(monkeypatch, capsys) -> None:
 def test_fetch_failure_surfaces_as_clean_exit(monkeypatch, capsys) -> None:
     monkeypatch.setattr(gh, "current_login", lambda: "simon")
 
-    def fake_fetch(login: str) -> list[dict[str, Any]]:
-        raise PlateError("gh failed to fetch your activity feed")
+    def fake_events(login: str) -> list[dict[str, Any]]:
+        raise PlateError("gh failed to fetch your activity")
 
-    monkeypatch.setattr(github, "fetch_events", fake_fetch)
+    monkeypatch.setattr(github, "fetch_events", fake_events)
     assert cli.main(["retro"]) == 1
-    assert "activity feed" in capsys.readouterr().err
+    assert "activity" in capsys.readouterr().err

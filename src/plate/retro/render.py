@@ -1,10 +1,11 @@
-"""Presentation: retro channels -> the terminal panel / markdown table.
+"""Presentation: retro sections -> the terminal panels / markdown tables.
 
-Pure rendering. The panel: a weekday ruler (weekends dim, today bold), one
-row per channel with digits for active days and dim dots for quiet ones, a
-Σ totals column, and a per-row "when did I last…?" annotation. Colour stays
-rationed: the one tint is the gold nudge on a reviews row that has been
-quiet for two days or more — the glance the view exists for.
+Pure rendering. One self-contained panel per repository owner — divider,
+weekday ruler (weekends dim, today bold), one row per channel with digits for
+active days and dim dots for quiet ones, a Σ totals column, and a per-row
+"when did I last…?" annotation. Colour stays rationed: the one tint is the
+gold nudge on a reviews row that has been quiet for two days or more — the
+glance the view exists for.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from plate.core.render import divider as divider
 from plate.core.render import format_age as format_age
 from plate.core.render import visible_length as visible_length
 
-from .model import RetroChannel
+from .model import RetroChannel, RetroSection
 
 LABEL_WIDTH = 14  # three-space indent + channel label, cells start here
 CELL = 3  # one day per cell: two digit columns + a space
@@ -83,24 +84,43 @@ def _row(channel: RetroChannel, days: int, use_color: bool) -> str:
     return f"{label}{pad}{cells}{channel.total:>4}   {annotation}"
 
 
-def panel(
-    channels: list[RetroChannel], days: int, now: datetime, use_color: bool
-) -> str:
-    """The full panel: divider, weekday ruler, one row per channel."""
-    lines = [_ruler(days, now, use_color)] + [
-        _row(channel, days, use_color) for channel in channels
+def _section_lines(
+    section: RetroSection, days: int, now: datetime, use_color: bool
+) -> list[str]:
+    return [_ruler(days, now, use_color)] + [
+        _row(channel, days, use_color) for channel in section.channels
     ]
-    width = max(visible_length(line) for line in lines)
-    header = divider(f"you · last {days} days", width, use_color)
-    return "\n".join([header, *lines])
 
 
-def markdown_table(channels: list[RetroChannel], days: int) -> str:
-    """The colour-free variant: totals and recency only — the day grid does
-    not survive markdown."""
-    lines = ["| Channel | Total | Last |", "| --- | --- | --- |"]
-    for channel in channels:
+def panel(
+    sections: list[RetroSection], days: int, now: datetime, use_color: bool
+) -> str:
+    """One self-contained panel per owner, most active owner first."""
+    blocks = [
+        _section_lines(section, days, now, use_color) for section in sections
+    ]
+    width = max(
+        visible_length(line) for block in blocks for line in block
+    )
+    lines: list[str] = []
+    for section, block in zip(sections, blocks, strict=True):
         lines.append(
-            f"| {channel.label} | {channel.total} | {_annotation(channel, days)} |"
+            divider(f"{section.owner} · last {days} days", width, use_color)
         )
+        lines.extend(block)
     return "\n".join(lines)
+
+
+def markdown_table(sections: list[RetroSection], days: int) -> str:
+    """The colour-free variant: one heading + totals table per owner — the
+    day grid does not survive markdown."""
+    parts = []
+    for section in sections:
+        lines = ["| Channel | Total | Last |", "| --- | --- | --- |"]
+        for channel in section.channels:
+            lines.append(
+                f"| {channel.label} | {channel.total} | "
+                f"{_annotation(channel, days)} |"
+            )
+        parts.append(f"## {section.owner}\n\n" + "\n".join(lines))
+    return "\n\n".join(parts)

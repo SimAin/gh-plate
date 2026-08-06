@@ -219,10 +219,11 @@ cap clipped the table.
 ## Retro view (`plate retro`)
 
 Where every other view looks at the work, `plate retro` looks at **you**: a
-day-by-day retrospective of your own GitHub activity across all repositories,
-private ones included. The glance it exists for: *"I haven't reviewed anything
-in two days… ah, because I was heads-down pushing — let's review something
-today."*
+day-by-day retrospective of your own GitHub activity, private repositories
+included, **split into one panel per repository owner** so work-org and
+personal activity read separately. The glance it exists for: *"I haven't
+reviewed anything in two days… ah, because I was heads-down committing —
+let's review something today."*
 
 ```sh
 plate retro              # last 14 days
@@ -230,26 +231,36 @@ plate retro --days 21    # 7-30
 ```
 
 ```
-── you · last 14 days ──────────────────────────────────────────────
+── acme-corp · last 14 days ────────────────────────────────────────
                S  S  M  T  W  T  F  S  S  M  T  W  T  F    Σ
    reviews     ·  ·  2  1  ·  3  1  ·  ·  2  1  1  ·  ·   11   last 2d ago
-   pushes      ·  ·  1  ·  2  ·  ·  ·  ·  ·  4  6  5  3   21   today
+   commits     ·  ·  1  ·  2  ·  ·  ·  ·  ·  4  6  5  3   21   today
    opened      ·  ·  ·  1  ·  ·  ·  ·  ·  ·  ·  1  ·  ·    2   last 2d ago
+── SimAin · last 14 days ───────────────────────────────────────────
+               S  S  M  T  W  T  F  S  S  M  T  W  T  F    Σ
+   reviews     ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·    0   none in 14d
+   commits     ·  ·  ·  ·  3  ·  ·  ·  ·  ·  ·  2  ·  1    6   today
+   opened      ·  ·  ·  ·  1  ·  ·  ·  ·  ·  ·  ·  ·  ·    1   last 9d ago
 ```
 
-Columns are days (weekday ruler, weekends dimmed, today bold, rightmost =
-today), digits are counts, `Σ` is the window total, and each row ends with
-the literal answer to "when did I last…?". The one tint is the gold nudge on
-a reviews row that has been quiet for two days or more. Rows: **reviews**
-submitted, **pushes** made (pushes, not commits — GitHub's feed doesn't
-expose commit counts for private repos), and PRs **opened**.
+Owners appear most active first. Columns are days (weekday ruler, weekends
+dimmed, today bold, rightmost = today), digits are counts, `Σ` is the window
+total, and each row ends with the literal answer to "when did I last…?". The
+one tint is the gold nudge on a reviews row that has been quiet for two days
+or more.
 
-It reads your own REST activity feed — the one source that includes
-private-repo activity — so it needs no checkout and runs from anywhere `gh`
-is authenticated. GitHub keeps only your 300 most recent events; if that
-can't reach back across the whole window, a note says so rather than passing
-quiet days off as rest. `--format markdown` prints a compact
-`channel | total | last` table instead of the grid.
+Each channel reads the best source that can see private activity — reviews
+from your own events feed, PRs opened from search, and **commits from your
+push events expanded through the compare API**, so branch work counts with
+its real magnitude on the day it happened, not the day it merged. It needs
+no checkout and runs from anywhere `gh` is authenticated.
+
+Honesty notes when a source hits its limits: GitHub keeps only your 300 most
+recent events (review/commit counts for early days may be undercounted), a
+push whose history was rewritten can't be expanded (counted as one commit on
+its push day), and search caps at 1000 results. Each case prints a note
+rather than passing gaps off as rest. `--format markdown` prints a compact
+per-owner `channel | total | last` table instead of the grid.
 
 ## Sprint view (`--sprint`)
 

@@ -1,8 +1,8 @@
 """The ``retro`` subcommand: a retrospective of your own GitHub activity.
 
-Thin wiring layer: parse the flags, fetch the viewer's activity feed, hand
-it to the model to bucket and the renderer to format. Needs no repo and no
-checkout — it runs from anywhere ``gh`` is authenticated.
+Thin wiring layer: parse the flags, fetch the three activity sources, hand
+them to the model to bucket by owner and the renderer to format. Needs no
+repo and no checkout — it runs from anywhere ``gh`` is authenticated.
 """
 
 from __future__ import annotations
@@ -19,8 +19,13 @@ from .model import (
     DEFAULT_DAYS,
     MAX_DAYS,
     MIN_DAYS,
-    build_channels,
+    build_sections,
+    commits_from_compares,
     coverage_note,
+    push_groups,
+    truncation_note,
+    unexpanded_note,
+    window_start,
 )
 
 
@@ -38,10 +43,11 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     retro = subparsers.add_parser(
         "retro",
         help="A day-by-day retrospective of your own GitHub activity — "
-        "reviews, pushes, PRs opened — across all repositories.",
+        "reviews, commits, PRs opened — split by repository owner.",
         description="A day-by-day retrospective of your own GitHub activity "
-        "(reviews, pushes, PRs opened) across all repositories, private ones "
-        "included. Needs no repository checkout.",
+        "(reviews, commits, PRs opened), private repositories included, "
+        "split into one panel per repository owner so work and personal "
+        "activity read separately. Needs no repository checkout.",
     )
     retro.add_argument(
         "--days",
@@ -69,23 +75,38 @@ def run(args: argparse.Namespace) -> int:
     if login is None:
         raise PlateError(
             "Could not determine your GitHub login (is `gh` authenticated?).\n"
-            "The retro view reads your own activity feed and cannot run "
-            "without it."
+            "The retro view reads your own activity and cannot run without it."
         )
 
     now = datetime.now(UTC)
+    since_date = window_start(args.days, now).date().isoformat()
     events = github.fetch_events(login)
-    channels = build_channels(events, args.days, now)
+    groups = push_groups(events, args.days, now)
+    compares = github.fetch_compares(
+        [(group.repo, group.base, group.head) for group in groups]
+    )
+    commit_refs, unexpanded = commits_from_compares(groups, compares, login)
+    pr_items, pr_total = github.fetch_opened(login, since_date)
+    sections = build_sections(commit_refs, pr_items, events, args.days, now)
+
+    if not sections:
+        print(f"No activity found in the last {args.days} days.")
+        return 0
 
     if args.format == "markdown":
-        print(render.markdown_table(channels, args.days))
+        print(render.markdown_table(sections, args.days))
     else:
         use_color = args.color == "always" or (
             args.color == "auto" and sys.stdout.isatty()
         )
-        print(render.panel(channels, args.days, now, use_color))
+        print(render.panel(sections, args.days, now, use_color))
 
-    note = coverage_note(events, args.days, now, github.EVENTS_FEED_CAP)
-    if note:
-        print(f"\n{note}", file=sys.stderr)
+    notes = [
+        truncation_note("PRs opened", len(pr_items), pr_total),
+        coverage_note(events, args.days, now, github.EVENTS_FEED_CAP),
+        unexpanded_note(unexpanded),
+    ]
+    for note in notes:
+        if note:
+            print(f"\n{note}", file=sys.stderr)
     return 0
