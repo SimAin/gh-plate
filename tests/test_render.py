@@ -83,6 +83,33 @@ def test_truncate_uses_ellipsis() -> None:
     assert render.truncate("short", 10) == "short"
 
 
+def test_visible_length_counts_display_columns() -> None:
+    # CJK and emoji render two columns each, not one code point
+    assert render.visible_length("中文标题") == 8
+    assert render.visible_length("🚀") == 2
+    assert render.visible_length("🚀 fix") == 6  # 2 + space + 3
+    # a variation selector adds no width to its base glyph
+    assert render.visible_length("⚠️") == render.visible_length("⚠")
+
+
+def test_format_cell_pads_double_width_to_same_columns() -> None:
+    ascii_cell = render.format_cell("ab", 8)
+    cjk_cell = render.format_cell("中文", 8)  # two glyphs, four columns
+    assert render.visible_length(ascii_cell) == 8
+    assert render.visible_length(cjk_cell) == 8
+    assert cjk_cell == "中文    "  # four trailing spaces fill the remaining columns
+
+
+def test_truncate_double_width_never_splits_glyph() -> None:
+    # budget 5 lands mid-glyph: drop the straddling glyph, ellipsis fits the cut
+    assert render.truncate("中文标题", 5) == "中文…"
+    assert render.visible_length(render.truncate("中文标题", 5)) == 5
+    # a value already within the column budget is returned untouched
+    assert render.truncate("中文", 4) == "中文"
+    # emoji title, odd budget: two columns for the glyph, one for the ellipsis
+    assert render.truncate("🚀🚀🚀", 3) == "🚀…"
+
+
 def test_format_labels_packs_whole_labels_with_overflow_count() -> None:
     # one whole label fits, the rest become +N (never mashed/mid-word)
     assert render.format_labels(["security", "automation"], 18) == "security +1"

@@ -252,6 +252,23 @@ def test_ci_column_alignment_survives_empty_cells() -> None:
     assert len(widths) == 1
 
 
+def test_emoji_cjk_title_keeps_columns_aligned() -> None:
+    # A double-width title must not shift the columns to its right: both rows
+    # carry the same assignee, which must begin at the same display column.
+    rows = rows_for(
+        pr(1, "Plain ascii title", ["alice"]),
+        pr(2, "🚀 中文 title", ["alice"]),
+    )
+    data_lines = [
+        line
+        for line in render.terminal_table(rows, use_color=False).splitlines()
+        if line and not line.startswith("── ")
+    ][1:]
+    assert len({visible_length(line) for line in data_lines}) == 1
+    offsets = {visible_length(line[: line.index("alice")]) for line in data_lines}
+    assert len(offsets) == 1
+
+
 # --- header, dividers, ordering ----------------------------------------------
 
 
