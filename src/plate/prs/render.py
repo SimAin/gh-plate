@@ -6,8 +6,8 @@ glyph, the CI glyph, a coloured Review word, and a stale Last); group membership
 is carried by the labelled dividers, and settled work ("the rest") is dimmed
 whole. The one deliberate exception is the soft, non-health blue on a Release
 PR — a glance of colour flagging the release train. Direction on the Last
-column is carried by weight alone (D11): full weight = the other side moved
-last and the days are your lag; dim = you moved last, nothing to chase.
+column is carried by weight alone: full weight = the other side moved last
+and the days are your lag; dim = you moved last, nothing to chase.
 
 Builds on :mod:`plate.core.render` for the domain-agnostic primitives (ANSI/
 width helpers, ``format_cell``, ``format_age``, ``hyperlink``, ``divider``);
@@ -193,10 +193,9 @@ def _pr_row_line(
     cc = use_color and not muted
 
     glyph, glyph_color = STATE_GLYPHS[pr_state(row)]
-    # Age (days open) is context, never a call to action — always dim. The
-    # Last cell carries both urgency signals: rose when stale, full weight
-    # when the other side moved last (the days are *your* lag), dim when you
-    # moved last or the direction is unknown.
+    # Age (days open) is context — always dim. Last carries the urgency:
+    # rose when stale, full weight when the other side moved last, dim
+    # otherwise.
     last_text = format_age(row.last_activity_days)
     if last_text and row.is_stale:
         last = colorize(last_text, SOFT_ROSE, cc)

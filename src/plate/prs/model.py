@@ -45,14 +45,12 @@ class PrRow:
     owner view reads each node's own ``repository.nameWithOwner`` — that is what
     :func:`group_by_repo` sections on.
 
-    ``age_days`` is days since the PR was opened (createdAt) — total time in
-    flight. ``last_activity_days`` is days since the last *human* move across
-    the commit/review/comment channels (falling back to updatedAt when only
-    bots ever touched the PR), and ``last_activity_mine`` carries its
-    direction: True when you moved last, False when another human did, None
-    when the direction is unknowable (bot-only fallback, missing actor login,
-    or no viewer). The per-channel lags are kept even though the views render
-    only their max — see D11.
+    ``age_days`` is days since the PR was opened. ``last_activity_days`` is
+    days since the last *human* move across the commit/review/comment channels
+    (updatedAt when only bots ever touched it); ``last_activity_mine`` is its
+    direction — True you moved last, False another human did, None when no
+    direction can be claimed. The per-channel lags are kept for future
+    heuristics even though the views render only their max.
     """
 
     repo: str
@@ -86,9 +84,8 @@ class PrSummary:
     """The counts behind the one-line TLDR — data only, no formatting.
 
     Formatting (zero-suppression, the ``·``-joined line) lives in the render
-    layer; this is just the five figures it needs. ``your_move`` counts the
-    rows where the other side moved last on a PR that is yours or to review —
-    the waiting-on-you figure (D11).
+    layer; this is just the five figures it needs. ``your_move`` counts rows
+    where the other side moved last on a PR that is yours or to review.
     """
 
     open: int
@@ -226,13 +223,10 @@ def age_in_days(pr: dict[str, Any], now: datetime | None) -> int | None:
     return _days_since(pr.get("createdAt"), now)
 
 
-# --- last-activity channels (issue #79) ----------------------------------------
+# --- last-activity channels -----------------------------------------------
 #
-# Each channel yields at most one (timestamp, login) event — the fetch layer
-# requests only the trailing item per connection. Bot actors are skipped so a
-# renovate rebase or CI-bot comment never reads as a human move; an event
-# whose actor login is unknowable (e.g. a commit with no linked user) still
-# counts as activity but carries login None, so no direction is claimed.
+# One trailing (timestamp, login) event per channel. Bot actors are skipped;
+# an event with no actor login counts as activity but claims no direction.
 
 
 def _last_commit_event(pr: dict[str, Any]) -> tuple[str, str | None] | None:
@@ -273,11 +267,9 @@ def last_human_activity(
 ) -> tuple[dict[str, int | None], int | None, str | None, bool]:
     """The per-channel lags and the winning last human move.
 
-    Returns ``(channel_days, last_days, last_login, is_fallback)``:
-    ``channel_days`` maps commit/review/comment to each channel's own lag;
-    ``last_days``/``last_login`` describe the most recent human event across
-    them. With no human event at all (bot-only PRs), ``last_days`` falls back
-    to updatedAt and ``is_fallback`` is True so callers claim no direction.
+    Returns ``(channel_days, last_days, last_login, is_fallback)``. With no
+    human event at all (a bot-only PR), ``last_days`` falls back to updatedAt
+    and ``is_fallback`` is True so callers claim no direction.
     """
     events = {
         "commit": _last_commit_event(pr),
@@ -386,8 +378,7 @@ def normalize_rows(
         channel_days, last_days, last_login, is_fallback = last_human_activity(
             pr, now
         )
-        # Direction is viewer-relative and only ever *claimed*: with no human
-        # event, no actor login, or no viewer, it stays None (rendered dim).
+        # Viewer-relative; unknown actor or unknown viewer claims nothing.
         last_mine: bool | None = None
         if not is_fallback and last_login is not None and current_login is not None:
             last_mine = last_login == current_login
@@ -406,8 +397,7 @@ def normalize_rows(
                 is_release_pr=is_release_pr(pr.get("title")),
                 bot_name=bot_name(pr),
                 i_approved=i_approved(pr, current_login),
-                # Staleness is about inactivity, not tenure: it anchors on the
-                # last human move (updatedAt only as the bot-only fallback).
+                # Staleness anchors on the last human move, not tenure.
                 is_stale=last_days is not None and last_days >= stale_days,
                 age_days=age_in_days(pr, now),
                 last_activity_days=last_days,
@@ -455,8 +445,7 @@ def sort_key(row: PrRow) -> tuple[int, int]:
 
 
 def your_move(row: PrRow) -> bool:
-    """Whether the ball is in your court: another human moved last on a PR
-    that is yours (respond) or to review (review it)."""
+    """Another human moved last on a PR that is yours or to review."""
     return row.last_activity_mine is False and (row.is_mine or row.is_to_review)
 
 

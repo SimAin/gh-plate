@@ -21,11 +21,9 @@ from plate.core import gh
 # review-request and bot handling. `gh api graphql --paginate` walks pages via
 # $endCursor when the limit needs more than one.
 #
-# The last-activity signal (issue #79) reads one trailing event per channel:
-# the head commit's committedDate/author (already fetched for the CI rollup),
-# `reviews(last: 1)` — deliberately not latestOpinionatedReviews, so a
-# comment-only review (an inline-feedback batch) counts as activity — and
-# `comments(last: 1)`. createdAt anchors the Age column.
+# The last-activity signal reads one trailing event per channel: the head
+# commit, `reviews(last: 1)` — not latestOpinionatedReviews, so comment-only
+# reviews count — and `comments(last: 1)`. createdAt anchors the Age column.
 PR_QUERY = """
 query($owner: String!, $name: String!, $pageSize: Int!, $endCursor: String) {
   viewer { login }

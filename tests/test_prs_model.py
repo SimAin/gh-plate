@@ -37,9 +37,8 @@ def pr(
     """A PR node in the GraphQL shape the fetch layer produces.
 
     ``last_commit``/``last_review``/``last_comment`` are ``(timestamp, login)``
-    pairs for the trailing event per channel — the shape the last-activity
-    fetch (#79) adds. A ``last_commit`` login of None models a commit with no
-    linked GitHub user.
+    pairs for the trailing event per channel. A ``last_commit`` login of None
+    models a commit with no linked GitHub user.
     """
     commit: dict[str, object] = {
         "statusCheckRollup": {"state": rollup} if rollup else None

@@ -51,7 +51,7 @@ def pr(
     """A PR node in the GraphQL shape the fetch layer produces.
 
     ``last_commit``/``last_review``/``last_comment`` are ``(timestamp, login)``
-    pairs for the trailing event per channel — the last-activity shape (#79).
+    pairs for the trailing event per channel.
     """
     commit: dict[str, object] = {
         "statusCheckRollup": {"state": rollup} if rollup else None
@@ -450,7 +450,7 @@ def test_symbol_key_teaches_glyphs_and_colours() -> None:
     assert "pass" in key
     assert "fail" in key
     assert "stale" in key
-    # The Age/Last idiom has to be taught — weight is subtle (D11).
+    # The Age/Last idiom has to be taught — weight is subtle.
     assert "days open" in key
     assert "last human move" in key
     assert "yours to answer" in key
