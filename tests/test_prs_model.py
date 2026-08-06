@@ -23,12 +23,31 @@ def pr(
     comments: int = 0,
     latest_reviews: list[dict[str, object]] | None = None,
     author: str | None = None,
+    created_at: str | None = None,
     updated_at: str | None = None,
     mergeable: str | None = None,
     rollup: str | None = None,
     author_type: str = "User",
+    last_commit: tuple[str, str | None] | None = None,
+    last_review: tuple[str, str] | None = None,
+    last_comment: tuple[str, str] | None = None,
+    review_author_type: str = "User",
+    comment_author_type: str = "User",
 ) -> dict[str, object]:
-    """A PR node in the GraphQL shape the fetch layer produces."""
+    """A PR node in the GraphQL shape the fetch layer produces.
+
+    ``last_commit``/``last_review``/``last_comment`` are ``(timestamp, login)``
+    pairs for the trailing event per channel. A ``last_commit`` login of None
+    models a commit with no linked GitHub user.
+    """
+    commit: dict[str, object] = {
+        "statusCheckRollup": {"state": rollup} if rollup else None
+    }
+    if last_commit:
+        commit["committedDate"] = last_commit[0]
+        commit["author"] = {
+            "user": {"login": last_commit[1]} if last_commit[1] else None
+        }
     return {
         "number": number,
         "url": f"https://github.com/acme/widget/pull/{number}",
@@ -39,18 +58,37 @@ def pr(
         "latestReviews": {"nodes": latest_reviews or []},
         "reviewRequests": {"nodes": []},
         "author": {"login": author, "__typename": author_type} if author else None,
+        "createdAt": created_at,
         "updatedAt": updated_at,
         "mergeable": mergeable,
         "totalCommentsCount": comments,
-        "commits": {
+        "reviews": {
             "nodes": [
                 {
-                    "commit": {
-                        "statusCheckRollup": {"state": rollup} if rollup else None
-                    }
+                    "submittedAt": last_review[0],
+                    "author": {
+                        "login": last_review[1],
+                        "__typename": review_author_type,
+                    },
                 }
             ]
+            if last_review
+            else []
         },
+        "comments": {
+            "nodes": [
+                {
+                    "createdAt": last_comment[0],
+                    "author": {
+                        "login": last_comment[1],
+                        "__typename": comment_author_type,
+                    },
+                }
+            ]
+            if last_comment
+            else []
+        },
+        "commits": {"nodes": [{"commit": commit}]},
     }
 
 
@@ -190,24 +228,160 @@ def test_i_approved_from_latest_reviews() -> None:
     assert not rows[0].is_mine
 
 
-def test_age_and_staleness() -> None:
+def _iso(now: datetime, days_ago: int) -> str:
+    return (now - timedelta(days=days_ago)).isoformat().replace("+00:00", "Z")
+
+
+def test_age_is_days_since_created() -> None:
     now = datetime(2026, 6, 19, tzinfo=UTC)
-    fresh = (now - timedelta(days=2)).isoformat().replace("+00:00", "Z")
-    old = (now - timedelta(days=30)).isoformat().replace("+00:00", "Z")
+    rows = model.normalize_rows(
+        [pr(1, "Week old", ["alice"], created_at=_iso(now, 7))],
+        "simon",
+        now=now,
+    )
+    assert rows[0].age_days == 7
+
+
+def test_staleness_anchors_on_last_human_activity_not_updated_at() -> None:
+    now = datetime(2026, 6, 19, tzinfo=UTC)
     rows = model.normalize_rows(
         [
-            pr(1, "Fresh", ["alice"], updated_at=fresh),
-            pr(2, "Stale", ["alice"], updated_at=old),
+            # Label churn bumped updatedAt yesterday, but the last human move
+            # was 30 days ago — the PR is stale.
+            pr(
+                1,
+                "Churned but cold",
+                ["alice"],
+                updated_at=_iso(now, 1),
+                last_commit=(_iso(now, 30), "alice"),
+            ),
+            # A fresh human move keeps it live regardless of tenure.
+            pr(
+                2,
+                "Old but alive",
+                ["alice"],
+                created_at=_iso(now, 60),
+                last_review=(_iso(now, 2), "alice"),
+            ),
         ],
         "simon",
         now=now,
         stale_days=14,
     )
+    assert rows[0].is_stale
+    assert rows[0].last_activity_days == 30
+    assert not rows[1].is_stale
+    assert rows[1].last_activity_days == 2
 
-    assert rows[0].age_days == 2
-    assert not rows[0].is_stale
-    assert rows[1].age_days == 30
-    assert rows[1].is_stale
+
+def test_last_activity_is_the_max_across_channels() -> None:
+    now = datetime(2026, 6, 19, tzinfo=UTC)
+    rows = model.normalize_rows(
+        [
+            pr(
+                1,
+                "All three channels",
+                ["alice"],
+                last_commit=(_iso(now, 7), "simon"),
+                last_review=(_iso(now, 2), "alice"),
+                last_comment=(_iso(now, 4), "simon"),
+            ),
+        ],
+        "simon",
+        now=now,
+    )
+    # The review (2d, alice) wins; the per-channel lags are all kept.
+    assert rows[0].last_activity_days == 2
+    assert rows[0].last_activity_mine is False
+    assert rows[0].last_commit_days == 7
+    assert rows[0].last_review_days == 2
+    assert rows[0].last_comment_days == 4
+
+
+def test_last_activity_direction_is_viewer_relative() -> None:
+    now = datetime(2026, 6, 19, tzinfo=UTC)
+    rows = model.normalize_rows(
+        [
+            pr(1, "You moved last", ["alice"], last_commit=(_iso(now, 1), "simon")),
+            pr(2, "They moved last", ["alice"], last_review=(_iso(now, 1), "alice")),
+        ],
+        "simon",
+        now=now,
+    )
+    assert rows[0].last_activity_mine is True
+    assert rows[1].last_activity_mine is False
+
+
+def test_bot_events_never_count_as_activity() -> None:
+    now = datetime(2026, 6, 19, tzinfo=UTC)
+    rows = model.normalize_rows(
+        [
+            # A bot comment yesterday must not mask alice's 5-day-old review.
+            pr(
+                1,
+                "Bot chatter",
+                ["alice"],
+                last_review=(_iso(now, 5), "alice"),
+                last_comment=(_iso(now, 1), "some-ci[bot]"),
+            ),
+            # Typed as Bot without the login convention: same treatment.
+            pr(
+                2,
+                "Typed bot",
+                ["alice"],
+                last_review=(_iso(now, 5), "alice"),
+                last_comment=(_iso(now, 1), "quiet-ci"),
+                comment_author_type="Bot",
+            ),
+        ],
+        "simon",
+        now=now,
+    )
+    for row in rows:
+        assert row.last_activity_days == 5
+        assert row.last_activity_mine is False
+        assert row.last_comment_days is None
+
+
+def test_bot_only_pr_falls_back_to_updated_at_with_no_direction() -> None:
+    now = datetime(2026, 6, 19, tzinfo=UTC)
+    rows = model.normalize_rows(
+        [
+            pr(
+                1,
+                "Update all deps",
+                author="app/renovate",
+                updated_at=_iso(now, 5),
+                last_commit=(_iso(now, 5), "renovate[bot]"),
+            ),
+        ],
+        "simon",
+        now=now,
+    )
+    assert rows[0].last_activity_days == 5
+    assert rows[0].last_activity_mine is None
+
+
+def test_commit_without_linked_user_counts_but_claims_no_direction() -> None:
+    now = datetime(2026, 6, 19, tzinfo=UTC)
+    rows = model.normalize_rows(
+        [pr(1, "Orphan commit", ["alice"], last_commit=(_iso(now, 3), None))],
+        "simon",
+        now=now,
+    )
+    assert rows[0].last_activity_days == 3
+    assert rows[0].last_activity_mine is None
+
+
+def test_no_viewer_means_no_direction_claim() -> None:
+    now = datetime(2026, 6, 19, tzinfo=UTC)
+    rows = model.normalize_rows(
+        [pr(1, "x", ["alice"], last_review=(_iso(now, 1), "alice"))],
+        None,
+        now=now,
+    )
+    assert rows[0].last_activity_days == 1
+    assert rows[0].last_activity_mine is None
 
 
 def test_bot_detection_matrix() -> None:
@@ -295,7 +469,35 @@ def test_summary_counts() -> None:
 def test_summary_counts_zeroes_when_nothing_pending() -> None:
     rows = model.normalize_rows([pr(1, "Mine", ["simon"])], "simon")
     counts = model.summary_counts(rows)
-    assert counts == model.PrSummary(open=1, to_review=0, conflicts=0, failing_ci=0)
+    assert counts == model.PrSummary(
+        open=1, to_review=0, conflicts=0, failing_ci=0, your_move=0
+    )
+
+
+def test_your_move_counts_their_last_move_on_yours_and_to_review_only() -> None:
+    now = datetime(2026, 6, 19, tzinfo=UTC)
+    rows = model.normalize_rows(
+        [
+            # Mine, alice reviewed last -> my move.
+            pr(1, "Mine", ["simon"], last_review=(_iso(now, 2), "alice")),
+            # Mine, I pushed last -> waiting on them.
+            pr(2, "Mine too", ["simon"], last_commit=(_iso(now, 1), "simon")),
+            # To review, author pushed last -> my move.
+            pr(3, "To review", ["alice"], last_commit=(_iso(now, 3), "alice")),
+            # The rest (settled): their move, but not mine to make.
+            pr(
+                4,
+                "Settled",
+                ["bob"],
+                review_decision="APPROVED",
+                last_commit=(_iso(now, 1), "bob"),
+            ),
+        ],
+        "simon",
+        now=now,
+    )
+    assert [model.your_move(row) for row in rows] == [True, False, True, False]
+    assert model.summary_counts(rows).your_move == 2
 
 
 def test_comment_count_is_the_badge_figure() -> None:

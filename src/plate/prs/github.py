@@ -20,6 +20,10 @@ from plate.core import gh
 # rollup state. reviewRequests and the author __typename are fetched for
 # review-request and bot handling. `gh api graphql --paginate` walks pages via
 # $endCursor when the limit needs more than one.
+#
+# The last-activity signal reads one trailing event per channel: the head
+# commit, `reviews(last: 1)` — not latestOpinionatedReviews, so comment-only
+# reviews count — and `comments(last: 1)`. createdAt anchors the Age column.
 PR_QUERY = """
 query($owner: String!, $name: String!, $pageSize: Int!, $endCursor: String) {
   viewer { login }
@@ -35,6 +39,7 @@ query($owner: String!, $name: String!, $pageSize: Int!, $endCursor: String) {
         title
         url
         isDraft
+        createdAt
         updatedAt
         mergeable
         totalCommentsCount
@@ -47,8 +52,20 @@ query($owner: String!, $name: String!, $pageSize: Int!, $endCursor: String) {
         reviewRequests(first: 30) {
           nodes { requestedReviewer { ... on User { login } } }
         }
+        reviews(last: 1) {
+          nodes { submittedAt author { login __typename } }
+        }
+        comments(last: 1) {
+          nodes { createdAt author { login __typename } }
+        }
         commits(last: 1) {
-          nodes { commit { statusCheckRollup { state } } }
+          nodes {
+            commit {
+              committedDate
+              author { user { login } }
+              statusCheckRollup { state }
+            }
+          }
         }
       }
       pageInfo { hasNextPage endCursor }
@@ -74,6 +91,7 @@ fragment PrFields on PullRequest {
   title
   url
   isDraft
+  createdAt
   updatedAt
   mergeable
   totalCommentsCount
@@ -86,8 +104,20 @@ fragment PrFields on PullRequest {
   reviewRequests(first: 30) {
     nodes { requestedReviewer { ... on User { login } } }
   }
+  reviews(last: 1) {
+    nodes { submittedAt author { login __typename } }
+  }
+  comments(last: 1) {
+    nodes { createdAt author { login __typename } }
+  }
   commits(last: 1) {
-    nodes { commit { statusCheckRollup { state } } }
+    nodes {
+      commit {
+        committedDate
+        author { user { login } }
+        statusCheckRollup { state }
+      }
+    }
   }
   repository { nameWithOwner }
 }

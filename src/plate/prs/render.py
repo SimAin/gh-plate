@@ -2,10 +2,12 @@
 
 Pure rendering — takes the rows plus flags, returns a string; no I/O. Follows
 the inherited discipline: colour is rationed to *health* (the leading state
-glyph, the CI glyph, a coloured Review word, and a stale Age); group membership
+glyph, the CI glyph, a coloured Review word, and a stale Last); group membership
 is carried by the labelled dividers, and settled work ("the rest") is dimmed
 whole. The one deliberate exception is the soft, non-health blue on a Release
-PR — a glance of colour flagging the release train.
+PR — a glance of colour flagging the release train. Direction on the Last
+column is carried by weight alone: full weight = the other side moved last
+and the days are your lag; dim = you moved last, nothing to chase.
 
 Builds on :mod:`plate.core.render` for the domain-agnostic primitives (ANSI/
 width helpers, ``format_cell``, ``format_age``, ``hyperlink``, ``divider``);
@@ -39,6 +41,7 @@ from .model import (
     pr_state,
     sort_group,
     sort_key,
+    your_move,
 )
 
 # The elastic Title column is clamped between these; every other column is fixed.
@@ -81,6 +84,7 @@ _FIXED_BEFORE_TITLE: list[tuple[str, int, str]] = [("", 1, "left"), ("PR", 6, "l
 _FIXED_AFTER_TITLE: list[tuple[str, int, str]] = [
     ("Assignee", 16, "left"),
     ("Age", 4, "right"),
+    ("Last", 4, "right"),
     ("Review", 13, "left"),
     ("CI", 2, "left"),
     ("Cmt", 3, "right"),
@@ -189,12 +193,16 @@ def _pr_row_line(
     cc = use_color and not muted
 
     glyph, glyph_color = STATE_GLYPHS[pr_state(row)]
-    age_text = format_age(row.age_days)
-    age = (
-        colorize(age_text, SOFT_ROSE, cc)
-        if age_text and row.is_stale
-        else dim(age_text, cc)
-    )
+    # Age (days open) is context — always dim. Last carries the urgency:
+    # rose when stale, full weight when the other side moved last, dim
+    # otherwise.
+    last_text = format_age(row.last_activity_days)
+    if last_text and row.is_stale:
+        last = colorize(last_text, SOFT_ROSE, cc)
+    elif row.last_activity_mine is False:
+        last = last_text
+    else:
+        last = dim(last_text, cc)
     values = [
         colorize(glyph, glyph_color, cc),
         dim(
@@ -207,7 +215,8 @@ def _pr_row_line(
         ),
         truncate(row.title, width_by["Title"]),
         _assignee_cell(row, width_by["Assignee"], cc),
-        age,
+        dim(format_age(row.age_days), cc),
+        last,
         colorize(_review_text(row), _review_color(row), cc),
         colorize(_check_label(row), CHECK_COLORS.get(row.check_state, ""), cc),
         dim(_format_comments(row.comments_count), cc),
@@ -299,6 +308,8 @@ def summary_line(summary: PrSummary) -> str:
         parts.append(f"{summary.conflicts} with conflicts")
     if summary.failing_ci:
         parts.append(f"{summary.failing_ci} failing CI")
+    if summary.your_move:
+        parts.append(f"{summary.your_move} your move")
     return " · ".join(parts)
 
 
@@ -325,7 +336,12 @@ def symbol_key(use_color: bool) -> str:
             bold("Key", use_color),
             "  State   " + states,
             "  CI      " + ci,
-            dim("  Age in rose = stale · dimmed rows = settled", use_color),
+            dim(
+                "  Age = days open · Last = days since last human move · "
+                "bright Last = their move, yours to answer",
+                use_color,
+            ),
+            dim("  Last in rose = stale · dimmed rows = settled", use_color),
         ]
     )
 
@@ -356,8 +372,13 @@ def owner_key(use_color: bool) -> str:
             "  State   " + states,
             "  CI      " + ci,
             dim(
+                "  Age = days open · Last = days since last human move · "
+                "bright Last = their move, yours to answer",
+                use_color,
+            ),
+            dim(
                 "  Rows are grouped by repository, most recently active repo "
-                "first · Age in rose = stale · dimmed rows are neither yours "
+                "first · Last in rose = stale · dimmed rows are neither yours "
                 "nor to review",
                 use_color,
             ),
@@ -374,6 +395,8 @@ def _markdown_signals(row: PrRow) -> list[str]:
         signals.append("To Review")
     if row.is_release_pr:
         signals.append("Release PR")
+    if your_move(row):
+        signals.append("your move")
     return signals
 
 
@@ -383,9 +406,9 @@ def markdown_table(rows: list[PrRow]) -> str:
     are escaped so a ``|`` in a title can't break the table.
     """
     lines = [
-        "| PR ID | Title | State | Assignee | Age | Review | CI | Comments | "
-        "Signal |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| PR ID | Title | State | Assignee | Age | Last | Review | CI | "
+        "Comments | Signal |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
 
     for row in sorted(rows, key=sort_key):
@@ -395,7 +418,8 @@ def markdown_table(rows: list[PrRow]) -> str:
         signal = escape_markdown_cell(", ".join(_markdown_signals(row)))
         lines.append(
             f"| {pr_id} | {title} | {STATE_LABELS[pr_state(row)]} | {assignees} | "
-            f"{format_age(row.age_days)} | {_review_text(row)} | {_check_label(row)} | "
+            f"{format_age(row.age_days)} | {format_age(row.last_activity_days)} | "
+            f"{_review_text(row)} | {_check_label(row)} | "
             f"{row.comments_count} | {signal} |"
         )
 

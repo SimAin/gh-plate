@@ -44,6 +44,13 @@ class PrRow:
     from the ``repo`` argument (its nodes carry no ``repository`` field); the
     owner view reads each node's own ``repository.nameWithOwner`` — that is what
     :func:`group_by_repo` sections on.
+
+    ``age_days`` is days since the PR was opened. ``last_activity_days`` is
+    days since the last *human* move across the commit/review/comment channels
+    (updatedAt when only bots ever touched it); ``last_activity_mine`` is its
+    direction — True you moved last, False another human did, None when no
+    direction can be claimed. The per-channel lags are kept for future
+    heuristics even though the views render only their max.
     """
 
     repo: str
@@ -61,6 +68,11 @@ class PrRow:
     i_approved: bool
     is_stale: bool
     age_days: int | None
+    last_activity_days: int | None
+    last_activity_mine: bool | None
+    last_commit_days: int | None
+    last_review_days: int | None
+    last_comment_days: int | None
     has_conflicts: bool
     mergeable_unknown: bool
     check_state: str
@@ -72,13 +84,15 @@ class PrSummary:
     """The counts behind the one-line TLDR — data only, no formatting.
 
     Formatting (zero-suppression, the ``·``-joined line) lives in the render
-    layer; this is just the four figures it needs.
+    layer; this is just the five figures it needs. ``your_move`` counts rows
+    where the other side moved last on a PR that is yours or to review.
     """
 
     open: int
     to_review: int
     conflicts: int
     failing_ci: int
+    your_move: int
 
 
 def connection_nodes(value: Any) -> list[dict[str, Any]]:
@@ -155,24 +169,30 @@ def i_approved(pr: dict[str, Any], current_login: str | None) -> bool:
     return False
 
 
-def bot_name(pr: dict[str, Any]) -> str | None:
-    """The display name when the PR author is a bot, else None.
+def is_bot_actor(author: Any) -> bool:
+    """Whether an ``author``/actor dict is a bot.
 
     Detection uses GitHub's own author type plus the two login conventions
     bots appear under (`app/name` from gh, `name[bot]` from the REST side),
     so Renovate, github-actions, pre-commit-ci etc. all get the same
     treatment Dependabot did — and a human named "dependabotfan" does not.
     """
-    login = author_login(pr)
-    if login is None:
-        return None
-    author = pr.get("author")
-    is_bot = (
-        (isinstance(author, dict) and author.get("__typename") == "Bot")
+    if not isinstance(author, dict):
+        return False
+    login = author.get("login")
+    if not isinstance(login, str) or not login:
+        return False
+    return (
+        author.get("__typename") == "Bot"
         or login.startswith("app/")
         or login.endswith("[bot]")
     )
-    if not is_bot:
+
+
+def bot_name(pr: dict[str, Any]) -> str | None:
+    """The display name when the PR author is a bot, else None."""
+    login = author_login(pr)
+    if login is None or not is_bot_actor(pr.get("author")):
         return None
     name = login.split("/", 1)[-1]
     if name.endswith("[bot]"):
@@ -189,13 +209,89 @@ def parse_timestamp(value: Any) -> datetime | None:
         return None
 
 
-def age_in_days(pr: dict[str, Any], now: datetime | None) -> int | None:
+def _days_since(value: Any, now: datetime | None) -> int | None:
     if now is None:
         return None
-    updated = parse_timestamp(pr.get("updatedAt"))
-    if updated is None:
+    timestamp = parse_timestamp(value)
+    if timestamp is None:
         return None
-    return max(0, (now - updated).days)
+    return max(0, (now - timestamp).days)
+
+
+def age_in_days(pr: dict[str, Any], now: datetime | None) -> int | None:
+    """Days since the PR was opened — total time in flight (the Age column)."""
+    return _days_since(pr.get("createdAt"), now)
+
+
+# --- last-activity channels -----------------------------------------------
+#
+# One trailing (timestamp, login) event per channel. Bot actors are skipped;
+# an event with no actor login counts as activity but claims no direction.
+
+
+def _last_commit_event(pr: dict[str, Any]) -> tuple[str, str | None] | None:
+    commits = connection_nodes(pr.get("commits"))
+    commit = commits[0].get("commit") if commits else None
+    if not isinstance(commit, dict):
+        return None
+    date = commit.get("committedDate")
+    if not isinstance(date, str) or not date:
+        return None
+    author = commit.get("author")
+    user = author.get("user") if isinstance(author, dict) else None
+    if is_bot_actor(user):
+        return None
+    login = user.get("login") if isinstance(user, dict) else None
+    return date, login if isinstance(login, str) and login else None
+
+
+def _last_actor_event(
+    pr: dict[str, Any], connection: str, timestamp_field: str
+) -> tuple[str, str | None] | None:
+    nodes = connection_nodes(pr.get(connection))
+    if not nodes:
+        return None
+    node = nodes[0]
+    date = node.get(timestamp_field)
+    if not isinstance(date, str) or not date:
+        return None
+    author = node.get("author")
+    if is_bot_actor(author):
+        return None
+    login = author.get("login") if isinstance(author, dict) else None
+    return date, login if isinstance(login, str) and login else None
+
+
+def last_human_activity(
+    pr: dict[str, Any], now: datetime | None
+) -> tuple[dict[str, int | None], int | None, str | None, bool]:
+    """The per-channel lags and the winning last human move.
+
+    Returns ``(channel_days, last_days, last_login, is_fallback)``. With no
+    human event at all (a bot-only PR), ``last_days`` falls back to updatedAt
+    and ``is_fallback`` is True so callers claim no direction.
+    """
+    events = {
+        "commit": _last_commit_event(pr),
+        "review": _last_actor_event(pr, "reviews", "submittedAt"),
+        "comment": _last_actor_event(pr, "comments", "createdAt"),
+    }
+    channel_days = {
+        channel: _days_since(event[0], now) if event else None
+        for channel, event in events.items()
+    }
+    dated: list[tuple[datetime, str | None]] = []
+    for event in events.values():
+        if event is None:
+            continue
+        timestamp = parse_timestamp(event[0])
+        if timestamp is not None:
+            dated.append((timestamp, event[1]))
+    if not dated:
+        return channel_days, _days_since(pr.get("updatedAt"), now), None, True
+    latest, login = max(dated, key=lambda item: item[0])
+    days = max(0, (now - latest).days) if now is not None else None
+    return channel_days, days, login, False
 
 
 def has_conflicts(pr: dict[str, Any]) -> bool:
@@ -279,7 +375,13 @@ def normalize_rows(
         # Store display-ready names: your own login reads as "me" wherever it
         # appears in the assignee list.
         assignees = ["me" if login == current_login else login for login in assignees]
-        age = age_in_days(pr, now)
+        channel_days, last_days, last_login, is_fallback = last_human_activity(
+            pr, now
+        )
+        # Viewer-relative; unknown actor or unknown viewer claims nothing.
+        last_mine: bool | None = None
+        if not is_fallback and last_login is not None and current_login is not None:
+            last_mine = last_login == current_login
         rows.append(
             PrRow(
                 repo=pr_repo(pr, repo),
@@ -295,8 +397,14 @@ def normalize_rows(
                 is_release_pr=is_release_pr(pr.get("title")),
                 bot_name=bot_name(pr),
                 i_approved=i_approved(pr, current_login),
-                is_stale=age is not None and age >= stale_days,
-                age_days=age,
+                # Staleness anchors on the last human move, not tenure.
+                is_stale=last_days is not None and last_days >= stale_days,
+                age_days=age_in_days(pr, now),
+                last_activity_days=last_days,
+                last_activity_mine=last_mine,
+                last_commit_days=channel_days["commit"],
+                last_review_days=channel_days["review"],
+                last_comment_days=channel_days["comment"],
                 has_conflicts=has_conflicts(pr),
                 mergeable_unknown=pr.get("mergeable") == "UNKNOWN",
                 check_state=check_state(pr),
@@ -336,8 +444,13 @@ def sort_key(row: PrRow) -> tuple[int, int]:
     return (sort_group(row), row.original_index)
 
 
+def your_move(row: PrRow) -> bool:
+    """Another human moved last on a PR that is yours or to review."""
+    return row.last_activity_mine is False and (row.is_mine or row.is_to_review)
+
+
 def summary_counts(rows: list[PrRow]) -> PrSummary:
-    """Count the four figures the one-line TLDR reports — see :class:`PrSummary`.
+    """Count the five figures the one-line TLDR reports — see :class:`PrSummary`.
 
     The counting lives here; zero-suppression and formatting are the render
     layer's concern.
@@ -347,6 +460,7 @@ def summary_counts(rows: list[PrRow]) -> PrSummary:
         to_review=sum(1 for row in rows if sort_group(row) == 1),
         conflicts=sum(1 for row in rows if pr_state(row) == "conflict"),
         failing_ci=sum(1 for row in rows if row.check_state == "failure"),
+        your_move=sum(1 for row in rows if your_move(row)),
     )
 
 
