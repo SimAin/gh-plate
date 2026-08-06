@@ -351,6 +351,48 @@ D11.
 
 ---
 
+## D13 — `plate retro`: a viewer-scoped domain on the REST events feed (issue #81)
+
+**Decision:** A third domain, `plate/retro/`, renders a day-by-day panel of
+the viewer's own activity — **reviews / pushes / PRs opened** — over a 14-day
+window (`--days`, bounded 7–30). It is a **subcommand, not a `prs` flag**:
+different data, different subject (you, not the work), different tense
+(retrospective), and it needs no checkout — repo resolution is never touched.
+The data source is the REST **events feed** (`/users/LOGIN/events`, three
+pages of 100), *not* GraphQL's `contributionsCollection`.
+
+**Why the events feed:** the issue specified `contributionsCollection`, and it
+was **rejected on evidence during implementation**: its itemized connections
+expose *public* activity only — private-repo work is folded into an opaque
+`restrictedContributionsCount` even for the authenticated user querying
+themselves (probed live: totals 0, restricted 69, on an account whose work is
+all private). A retro that can't see private work shows a permanently empty
+panel. One's own events feed includes private events and even improves on the
+original design: comments become countable later (they are not a contribution
+type), at the cost of the feed's own limits.
+
+**Why pushes, not commits:** private-repo PushEvents carry no commit list or
+count (only `before`/`head`/`ref`), so commits-per-day cannot be computed
+honestly. The channel counts *pushes* and says so.
+
+**Panel:** weekday ruler (weekends dim, today bold), digits per active day
+with dim `·` for quiet ones, a `Σ` totals column (cells cap at 99, the total
+doesn't), and a per-row `today` / `last Nd ago` / `none in Nd` annotation.
+The one tint is the gold nudge on a reviews row quiet ≥ 2 days — the
+motivating glance; pushes/opened are nobody's duty and stay dim. Markdown
+gets `channel | total | last` — the grid doesn't survive colour-free
+rendering.
+
+**Consequence & accepted limits:** the boundary test covers the new domain
+automatically (it imports only `plate.core`). GitHub retains at most 300
+events / 90 days: pagination stops at the cap (page 4 is a hard API error),
+and when a capped feed cannot reach the window's start a stderr note says the
+early days may be undercounted, rather than passing them off as rest. Day
+buckets are UTC. Event time is push/submit time, and force-push replays
+count again — the feed reports actions, not history.
+
+---
+
 ## Standing decisions carried from the architecture discussion
 
 - **Standalone, not a shared package.** The GraphQL fetch layer is specific enough

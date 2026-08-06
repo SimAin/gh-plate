@@ -216,6 +216,41 @@ excluded, results are sorted most-recently-active first, and a truncation note
 reports `showing N of M` whenever `--limit` or GitHub's 1000-results-per-search
 cap clipped the table.
 
+## Retro view (`plate retro`)
+
+Where every other view looks at the work, `plate retro` looks at **you**: a
+day-by-day retrospective of your own GitHub activity across all repositories,
+private ones included. The glance it exists for: *"I haven't reviewed anything
+in two days… ah, because I was heads-down pushing — let's review something
+today."*
+
+```sh
+plate retro              # last 14 days
+plate retro --days 21    # 7-30
+```
+
+```
+── you · last 14 days ──────────────────────────────────────────────
+               S  S  M  T  W  T  F  S  S  M  T  W  T  F    Σ
+   reviews     ·  ·  2  1  ·  3  1  ·  ·  2  1  1  ·  ·   11   last 2d ago
+   pushes      ·  ·  1  ·  2  ·  ·  ·  ·  ·  4  6  5  3   21   today
+   opened      ·  ·  ·  1  ·  ·  ·  ·  ·  ·  ·  1  ·  ·    2   last 2d ago
+```
+
+Columns are days (weekday ruler, weekends dimmed, today bold, rightmost =
+today), digits are counts, `Σ` is the window total, and each row ends with
+the literal answer to "when did I last…?". The one tint is the gold nudge on
+a reviews row that has been quiet for two days or more. Rows: **reviews**
+submitted, **pushes** made (pushes, not commits — GitHub's feed doesn't
+expose commit counts for private repos), and PRs **opened**.
+
+It reads your own REST activity feed — the one source that includes
+private-repo activity — so it needs no checkout and runs from anywhere `gh`
+is authenticated. GitHub keeps only your 300 most recent events; if that
+can't reach back across the whole window, a note says so rather than passing
+quiet days off as rest. `--format markdown` prints a compact
+`channel | total | last` table instead of the grid.
+
 ## Sprint view (`--sprint`)
 
 Where the default view is *"what's on my plate?"*, `plate issues --sprint` is
