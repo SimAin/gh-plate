@@ -92,6 +92,7 @@ class IssueRow:
     url: str
     title: str
     labels: list[str]
+    labels_hidden: int  # labels beyond the fetched page (the +N tail)
     comments_count: int
     age_days: int | None
     is_stale: bool
@@ -190,6 +191,20 @@ def _labels(issue: dict[str, Any]) -> list[str]:
             if cleaned:
                 labels.append(cleaned)
     return labels
+
+
+def _labels_hidden(issue: dict[str, Any]) -> int:
+    """Labels never fetched: ``totalCount`` minus the raw nodes returned.
+
+    Counted against the raw node count (before emoji/hidden filtering), since
+    ``totalCount`` is GitHub's raw label count. Absent ``totalCount`` -> 0, so
+    payloads/fixtures predating the field keep their behaviour.
+    """
+    connection = issue.get("labels") or {}
+    total = connection.get("totalCount")
+    if not isinstance(total, int):
+        return 0
+    return max(0, total - len(connection.get("nodes") or []))
 
 
 def _parent_number(issue: dict[str, Any], repo: str) -> int | None:
@@ -302,6 +317,7 @@ def _row_from_issue(
         url=str(issue.get("url") or ""),
         title=compact_text(issue.get("title")),
         labels=[] if context else _labels(issue),
+        labels_hidden=0 if context else _labels_hidden(issue),
         comments_count=0 if context else _comments_count(issue),
         age_days=age,
         is_stale=age is not None and age >= stale_days,
@@ -543,6 +559,7 @@ class SprintRow:
     url: str
     title: str
     labels: list[str]
+    labels_hidden: int  # labels beyond the fetched page (the +N tail)
     comments_count: int
     age_days: int | None
     is_stale: bool
@@ -680,6 +697,7 @@ def build_sprint_view(
                 url=str(content.get("url") or ""),
                 title=compact_text(content.get("title")),
                 labels=_labels(content),
+                labels_hidden=_labels_hidden(content),
                 comments_count=_comments_count(content),
                 age_days=age,
                 is_stale=age is not None and age >= stale_days,

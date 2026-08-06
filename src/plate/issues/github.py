@@ -65,7 +65,7 @@ query($q: String!, $pageSize: Int!, $endCursor: String) {
     nodes {
       ... on Issue {
         ...NodeFields
-        labels(first: 10) { nodes { name } }
+        labels(first: 10) { totalCount nodes { name } }
         comments { totalCount }
         assignees(first: 10) { nodes { login } }
         closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
@@ -198,7 +198,7 @@ query($q: String!, $endCursor: String) {{
               number title url updatedAt state
               repository {{ nameWithOwner }}
               assignees(first: 10) {{ nodes {{ login }} }}
-              labels(first: 10) {{ nodes {{ name }} }}
+              labels(first: 10) {{ totalCount nodes {{ name }} }}
               comments {{ totalCount }}
               subIssuesSummary {{ total completed }}
               parent {{ number }}

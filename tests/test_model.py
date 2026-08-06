@@ -27,6 +27,7 @@ def make_issue(
     title: str = "Issue",
     updated_days_ago: int | None = 0,
     labels: list[str] | None = None,
+    labels_total: int | None = None,
     comments: int = 0,
     sub_total: int = 0,
     sub_completed: int = 0,
@@ -45,6 +46,10 @@ def make_issue(
         "subIssuesSummary": {"total": sub_total, "completed": sub_completed},
         "closedByPullRequestsReferences": {"nodes": prs or []},
     }
+    # None means "payload omits totalCount" (fixtures predating the field) — the
+    # tail then defaults to 0, matching the real absent-field behaviour.
+    if labels_total is not None:
+        issue["labels"]["totalCount"] = labels_total
     if parent is not None:
         issue["parent"] = parent
     # None means "payload doesn't carry this field at all" (the real
@@ -83,6 +88,19 @@ def test_emoji_shortcodes_stripped_from_owned_labels() -> None:
 def test_hyphenated_emoji_shortcodes_stripped_from_owned_labels() -> None:
     idx = index([make_issue(1, labels=[":e-mail: correspondence", ":t-rex: legacy"])])
     assert idx[k(1)].labels == ["correspondence", "legacy"]
+
+
+def test_labels_hidden_counts_unfetched_tail() -> None:
+    # 14 total, 10 fetched -> 4 never fetched (the +N tail)
+    fetched = [f"l{i}" for i in range(10)]
+    idx = index([make_issue(1, labels=fetched, labels_total=14)])
+    assert idx[k(1)].labels_hidden == 4
+
+
+def test_labels_hidden_defaults_to_zero_without_total_count() -> None:
+    # payloads/fixtures without totalCount keep the old behaviour (no tail)
+    idx = index([make_issue(1, labels=["bug", "epic"])])
+    assert idx[k(1)].labels_hidden == 0
 
 
 def test_age_and_staleness() -> None:
@@ -158,12 +176,16 @@ def test_pr_state_flows_to_owned_row_but_not_context() -> None:
 # --- index: owned issues + context ancestors ---------------------------------
 
 def test_index_materializes_unowned_ancestor_as_context() -> None:
-    epic = make_issue(10, title="Epic", sub_total=3, sub_completed=1)
+    epic = make_issue(
+        10, title="Epic", sub_total=3, sub_completed=1,
+        labels=["a", "b"], labels_total=9,
+    )
     idx = index([make_issue(11, parent=epic)])
     assert set(idx) == {k(10), k(11)}
     assert idx[k(11)].mine is True
     assert idx[k(10)].mine is False          # ancestor not assigned to me
     assert idx[k(10)].labels == []           # context nodes carry no labels
+    assert idx[k(10)].labels_hidden == 0     # ...and never grow a +N tail
     assert idx[k(10)].sub_total == 3         # but do carry their rollup
     assert idx[k(11)].parent_number == 10
 

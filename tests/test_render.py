@@ -16,6 +16,7 @@ def make_row(
     age_days: int = 30,
     is_stale: bool = True,
     labels: list[str] | None = None,
+    labels_hidden: int = 0,
     comments: int = 0,
     parent_number: int | None = None,
     sub_total: int = 0,
@@ -34,6 +35,7 @@ def make_row(
         url=f"https://github.com/{repo}/issues/{number}",
         title=title,
         labels=labels or [],
+        labels_hidden=labels_hidden,
         comments_count=comments,
         age_days=age_days,
         is_stale=is_stale,
@@ -163,6 +165,36 @@ def test_format_labels_hides_hidden_labels() -> None:
 def test_format_labels_unchanged_without_resolver() -> None:
     # back-compat: no resolver behaves exactly like the plain packed cell
     assert render.format_labels(["security", "automation"], 18) == "security +1"
+
+
+def test_format_labels_hidden_tail_appears_without_in_fetch_overflow() -> None:
+    # everything fetched fits, but 3 labels were never fetched -> +3
+    assert render.format_labels(["ux", "bug"], 18, hidden=3) == "ux · bug +3"
+
+
+def test_format_labels_hidden_tail_sums_with_in_fetch_overflow() -> None:
+    # one label fits (in-fetch overflow +1) plus a 4-label tail -> +5
+    out = render.format_labels(["security", "automation"], 18, hidden=4)
+    assert out == "security +5"
+
+
+def test_format_labels_hidden_tail_only_when_nothing_visible() -> None:
+    # all fetched labels were emoji-only-stripped away, but a tail remains
+    assert render.format_labels([], 18, hidden=2) == "+2"
+
+
+def test_format_labels_hidden_zero_is_byte_identical() -> None:
+    # tail 0 must leave the existing behaviour untouched
+    assert render.format_labels(["security", "automation"], 18, hidden=0) == (
+        "security +1"
+    )
+    assert render.format_labels([], 18, hidden=0) == ""
+
+
+def test_pack_labels_folds_hidden_into_count() -> None:
+    assert render._pack_labels(["ux", "bug"], 18, 3) == "ux · bug +3"
+    assert render._pack_labels([], 18, 2) == "+2"
+    assert render._pack_labels(["ux", "bug"], 18, 0) == "ux · bug"
 
 
 def test_markdown_bolds_special_label_and_drops_hidden() -> None:
@@ -323,6 +355,7 @@ def make_sprint_row(
     age_days: int = 3,
     is_stale: bool = False,
     labels: list[str] | None = None,
+    labels_hidden: int = 0,
     comments: int = 0,
     sub_total: int = 0,
     sub_completed: int = 0,
@@ -334,6 +367,7 @@ def make_sprint_row(
         url=f"https://github.com/an-org/a-repo/issues/{number}",
         title=title,
         labels=labels or [],
+        labels_hidden=labels_hidden,
         comments_count=comments,
         age_days=age_days,
         is_stale=is_stale,
