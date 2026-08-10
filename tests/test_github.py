@@ -45,6 +45,27 @@ def test_run_missing_binary_raises_issue_check_error() -> None:
         gh.run_command(["no-such-binary-xyz", "--version"])
 
 
+def test_run_missing_binary_generic_install_hint() -> None:
+    with pytest.raises(gh.PlateError) as excinfo:
+        gh.run_command(["no-such-binary-xyz", "--version"])
+    assert "Install no-such-binary-xyz and ensure it is on PATH" in str(excinfo.value)
+
+
+def test_run_missing_gh_binary_hints_cli_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_missing(*args: Any, **kwargs: Any) -> None:
+        raise FileNotFoundError("gh")
+
+    monkeypatch.setattr(gh.subprocess, "run", raise_missing)
+    with pytest.raises(gh.PlateError) as excinfo:
+        gh.run_command(["gh", "api", "user"])
+    message = str(excinfo.value)
+    assert "'gh' is not installed" in message
+    assert "https://cli.github.com" in message
+    assert "gh auth login" in message
+
+
 def test_sprint_filter_defaults_to_iteration() -> None:
     assert github.sprint_filter("Iteration") == "iteration:@current"
     assert github.sprint_filter("Sprint") == "sprint:@current"
@@ -170,6 +191,12 @@ def test_validate_board_fields_rejects_multiword_sprint_field() -> None:
     message = str(excinfo.value)
     assert "single-word" in message
     assert "sprint cycle:@current" in message  # shows the broken token
+
+
+def test_single_select_options_unknown_field_returns_empty() -> None:
+    # Field not on the board (or an options-less payload) -> no options listed.
+    assert github._single_select_options(_fields(), "Column") == []
+    assert github._single_select_options([], "Status") == []
 
 
 # --- statusOrder validation (#7) ----------------------------------------------
@@ -302,6 +329,109 @@ def test_resolve_owner_type_unexpected_type_raises(
     monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout("Bot\n"))
     with pytest.raises(gh.PlateError, match="acme-bot"):
         gh.resolve_owner_type("acme-bot")
+
+
+# --- repo_from_remote fallback / current_repo / current_login ----------------
+
+
+def test_repo_from_remote_non_github_host_falls_back_to_gh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        captured["args"] = args
+        return subprocess.CompletedProcess(
+            args, 0, stdout="an-org/a-repo\n", stderr=""
+        )
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    repo = gh.repo_from_remote("git@git.example.com:an-org/a-repo.git")
+    assert repo == "an-org/a-repo"
+    assert captured["args"] == [
+        "gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"
+    ]
+
+
+def test_repo_from_remote_fallback_failure_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        gh, "run_command", _fake_run_with_stdout("boom", returncode=1)
+    )
+    assert gh.repo_from_remote("git@git.example.com:x/y.git") is None
+
+
+def test_repo_from_remote_fallback_empty_stdout_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout("\n"))
+    assert gh.repo_from_remote("git@git.example.com:x/y.git") is None
+
+
+def test_current_repo_parses_origin_remote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        gh, "run_command", _fake_run_with_stdout("git@github.com:an-org/a-repo.git\n")
+    )
+    assert gh.current_repo() == "an-org/a-repo"
+
+
+def test_current_repo_outside_git_repo_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        gh,
+        "run_command",
+        _fake_run_with_stdout("fatal: not a git repository", returncode=1),
+    )
+    with pytest.raises(gh.PlateError) as excinfo:
+        gh.current_repo()
+    message = str(excinfo.value)
+    assert "Not inside a git repository" in message
+    assert "--repo OWNER/REPO" in message
+
+
+def test_current_repo_unresolvable_remote_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # git yields a non-github remote; the gh fallback then fails too.
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        if args[0] == "git":
+            return subprocess.CompletedProcess(
+                args, 0, stdout="git@git.example.com:x/y.git\n", stderr=""
+            )
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="boom")
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    with pytest.raises(gh.PlateError) as excinfo:
+        gh.current_repo()
+    message = str(excinfo.value)
+    assert "Could not derive OWNER/REPO" in message
+    assert "git@git.example.com:x/y.git" in message
+    assert "--repo OWNER/REPO" in message
+
+
+def test_current_login_returns_stripped_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout("hub-user\n"))
+    assert gh.current_login() == "hub-user"
+
+
+def test_current_login_gh_failure_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout("", returncode=1))
+    assert gh.current_login() is None
+
+
+def test_current_login_empty_stdout_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout("\n"))
+    assert gh.current_login() is None
 
 
 # --- _search_issues / fetch_assigned_issues / fetch_owner_issues -------------
@@ -563,6 +693,40 @@ def test_search_paginated_non_transient_failure_does_not_retry(
         gh.search_paginated("QUERY", "q-str", 500, "acme")
 
 
+def test_search_paginated_invalid_json_raises_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout("not json"))
+    with pytest.raises(gh.PlateError, match="Could not parse gh response"):
+        gh.search_paginated("QUERY", "q-str", 10, "acme")
+
+
+def test_search_paginated_graphql_errors_raise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # gh exits 0 yet the payload carries a top-level errors list.
+    payload = json.dumps({"errors": [{"message": "Something went wrong"}]})
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout(payload))
+    with pytest.raises(gh.PlateError) as excinfo:
+        gh.search_paginated("QUERY", "q-str", 10, "acme")
+    message = str(excinfo.value)
+    assert "GraphQL error" in message
+    assert "Something went wrong" in message
+
+
+def test_search_paginated_invalid_json_on_second_page_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A good first page, then garbage mid-pagination.
+    pages = [
+        _search_payload(2, [{"number": 1}], has_next=True, end_cursor="CURSOR1"),
+        "not json",
+    ]
+    monkeypatch.setattr(gh, "run_command", _paged_fake_run(pages))
+    with pytest.raises(gh.PlateError, match="Could not parse gh response"):
+        gh.search_paginated("QUERY", "q-str", 10, "acme")
+
+
 def test_search_paginated_with_viewer_returns_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -736,6 +900,83 @@ def test_fetch_sprint_items_viewer_none_when_missing(
     assert viewer is None
 
 
+def test_fetch_sprint_items_paginates_with_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pages = [
+        _sprint_payload([{"n": 1}], has_next=True, end_cursor="CURSOR1"),
+        _sprint_payload([{"n": 2}]),
+    ]
+    seen: list[list[str]] = []
+
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        seen.append(args)
+        return subprocess.CompletedProcess(
+            args, 0, stdout=pages[len(seen) - 1], stderr=""
+        )
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    items, viewer = github.fetch_sprint_items(
+        "acme", "organization", 2, "Iteration", "Status"
+    )
+    assert [i["n"] for i in items] == [1, 2]
+    assert viewer == "hub-user"
+    assert len(seen) == 2
+    assert "endCursor=CURSOR1" in seen[1]
+    assert not any(a.startswith("endCursor=") for a in seen[0])
+
+
+def test_fetch_sprint_items_caps_runaway_pagination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Backstop for a broken board filter matching everything: one page already
+    # over the cap must truncate and stop, not follow the cursor.
+    nodes = [{"n": i} for i in range(github.SPRINT_ITEM_CAP + 1)]
+    fake_run = _paged_fake_run(
+        [_sprint_payload(nodes, has_next=True, end_cursor="CURSOR")]
+    )
+    monkeypatch.setattr(gh, "run_command", fake_run)
+
+    items, _viewer = github.fetch_sprint_items(
+        "acme", "organization", 2, "Iteration", "Status"
+    )
+    assert len(items) == github.SPRINT_ITEM_CAP
+    assert fake_run.calls["n"] == 1  # type: ignore[attr-defined]
+
+
+def test_fetch_sprint_items_gh_failure_raises_with_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        gh, "run_command", _fake_run_with_stdout("boom", returncode=1)
+    )
+    with pytest.raises(gh.PlateError) as excinfo:
+        github.fetch_sprint_items("acme", "organization", 2, "Iteration", "Status")
+    message = str(excinfo.value)
+    assert "gh failed to fetch project acme/2" in message
+    assert "boom" in message
+
+
+def test_fetch_sprint_items_invalid_json_raises_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout("not json"))
+    with pytest.raises(gh.PlateError, match="Could not parse gh response"):
+        github.fetch_sprint_items("acme", "organization", 2, "Iteration", "Status")
+
+
+def test_fetch_sprint_items_missing_project_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = json.dumps({"data": {"organization": {"projectV2": None}}})
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout(payload))
+    with pytest.raises(gh.PlateError) as excinfo:
+        github.fetch_sprint_items("acme", "organization", 2, "Iteration", "Status")
+    message = str(excinfo.value)
+    assert "No project #2 found for acme" in message
+    assert "read:project" in message
+
+
 # --- fetch_sprint_items / fetch_project_fields: GraphQL error handling ------
 
 
@@ -784,3 +1025,67 @@ def test_fetch_project_fields_other_graphql_error_raises_generic_dump(
 
     with pytest.raises(gh.PlateError, match="GraphQL error"):
         github.fetch_project_fields("acme", "organization", 2)
+
+
+def test_fetch_project_fields_gh_failure_raises_with_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        gh, "run_command", _fake_run_with_stdout("boom", returncode=1)
+    )
+    with pytest.raises(gh.PlateError) as excinfo:
+        github.fetch_project_fields("acme", "organization", 2)
+    message = str(excinfo.value)
+    assert "gh failed to fetch fields for project acme/2" in message
+    assert "boom" in message
+
+
+def test_fetch_project_fields_invalid_json_raises_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout("not json"))
+    with pytest.raises(gh.PlateError, match="Could not parse gh response"):
+        github.fetch_project_fields("acme", "organization", 2)
+
+
+def test_fetch_project_fields_missing_project_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = json.dumps({"data": {"organization": {"projectV2": None}}})
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout(payload))
+    with pytest.raises(gh.PlateError) as excinfo:
+        github.fetch_project_fields("acme", "organization", 2)
+    message = str(excinfo.value)
+    assert "No project #2 found for acme" in message
+    assert "read:project" in message
+
+
+def test_fetch_project_fields_returns_dict_nodes_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A null node (deleted field mid-query) must be dropped, not returned.
+    payload = json.dumps(
+        {
+            "data": {
+                "organization": {
+                    "projectV2": {
+                        "fields": {
+                            "nodes": [
+                                {"name": "Sprint", "dataType": "ITERATION"},
+                                None,
+                                {
+                                    "name": "Status",
+                                    "dataType": "SINGLE_SELECT",
+                                    "options": [{"name": "Backlog"}],
+                                },
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    )
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout(payload))
+    fields = github.fetch_project_fields("acme", "organization", 2)
+    assert [f["name"] for f in fields] == ["Sprint", "Status"]
+    assert fields[1]["options"] == [{"name": "Backlog"}]

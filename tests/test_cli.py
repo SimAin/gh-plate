@@ -67,6 +67,19 @@ def test_defaults_when_not_given() -> None:
     assert args.stale_days == issues_cli.DEFAULT_STALE_DAYS
 
 
+def test_config_path_flag_prints_explicit_config_and_exits_zero(capsys) -> None:
+    # Returns before any config load or gh call — nothing is stubbed here.
+    args = cli.parse_args(["issues", "--config-path", "--config", "/tmp/plate.json"])
+    assert issues_cli.run(args) == 0
+    assert capsys.readouterr().out.strip() == "/tmp/plate.json"
+
+
+def test_config_path_flag_defaults_to_resolved_location(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(config, "config_path", lambda: "/somewhere/config.json")
+    assert issues_cli.run(cli.parse_args(["issues", "--config-path"])) == 0
+    assert capsys.readouterr().out.strip() == "/somewhere/config.json"
+
+
 # --- owner view (--owner) ----------------------------------------------------
 
 
@@ -276,6 +289,17 @@ def test_owner_markdown_format(monkeypatch, capsys) -> None:
     assert "## an-org/repo-a" in capsys.readouterr().out
 
 
+def test_owner_markdown_alias_shows_display_line(monkeypatch, capsys) -> None:
+    cfg = config.Config(owners={"work": "company-org"})
+    _stub_owner(monkeypatch, issues=[_issue(1)], total=1, cfg=cfg)
+    assert issues_cli.run(
+        cli.parse_args(["issues", "--owner", "work", "--format", "markdown"])
+    ) == 0
+    out = capsys.readouterr().out
+    assert "*work → company-org*" in out
+    assert "## an-org/repo-a" in out
+
+
 def test_owner_show_key_prints_owner_key(monkeypatch, capsys) -> None:
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
     assert issues_cli.run(
@@ -328,6 +352,45 @@ def test_yours_renders_even_without_viewer(monkeypatch, capsys) -> None:
     assert "Issue 1" in capsys.readouterr().out
 
 
+def test_yours_empty_prints_message(monkeypatch, capsys) -> None:
+    _stub_yours(monkeypatch, issues=[], total=0)
+    assert issues_cli.run(cli.parse_args(["issues"])) == 0
+    out = capsys.readouterr().out
+    assert "No open issues assigned to you in an-org/a-repo." in out
+
+
+def test_yours_markdown_format(monkeypatch, capsys) -> None:
+    _stub_yours(monkeypatch, issues=[_issue(1)], total=1)
+    assert issues_cli.run(
+        cli.parse_args(["issues", "--format", "markdown"])
+    ) == 0
+    out = capsys.readouterr().out
+    assert "[#1](https://github.com/an-org/repo-a/issues/1)" in out
+    assert "Issue 1" in out
+
+
+def test_yours_show_key_prints_key(monkeypatch, capsys) -> None:
+    _stub_yours(monkeypatch, issues=[_issue(1)], total=1)
+    assert issues_cli.run(cli.parse_args(["issues", "--show-key"])) == 0
+    out = capsys.readouterr().out
+    assert "Key" in out
+    assert "Issue 1" in out
+
+
+def test_yours_truncation_note_goes_to_stderr(monkeypatch, capsys) -> None:
+    _stub_yours(monkeypatch, issues=[_issue(1), _issue(2)], total=5)
+    assert issues_cli.run(cli.parse_args(["issues", "--limit", "2"])) == 0
+    out, err = capsys.readouterr()
+    assert "Note: showing 2 of 5 assigned issues." in err
+    assert "Note:" not in out  # stdout stays clean for piping
+
+
+def test_yours_no_truncation_note_when_complete(monkeypatch, capsys) -> None:
+    _stub_yours(monkeypatch, issues=[_issue(1), _issue(2)], total=2)
+    assert issues_cli.run(cli.parse_args(["issues", "--limit", "2"])) == 0
+    assert "Note:" not in capsys.readouterr().err
+
+
 # --- sprint view: viewer login rides on the items fetch -----------------------
 
 
@@ -336,8 +399,38 @@ def _sprint_cfg() -> config.Config:
     return config.Config(projects={"an-org/a-repo": project})
 
 
+def _sprint_item(
+    number: int,
+    *,
+    repo: str = "an-org/a-repo",
+    assignees: tuple[str, ...] = ("me",),
+    iteration: str = "Sprint 7",
+) -> dict[str, Any]:
+    """A minimal board item whose content is an Issue in ``repo``."""
+    return {
+        "content": {
+            "__typename": "Issue",
+            "number": number,
+            "title": f"Item {number}",
+            "url": f"https://github.com/{repo}/issues/{number}",
+            "updatedAt": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "repository": {"nameWithOwner": repo},
+            "assignees": {"nodes": [{"login": a} for a in assignees]},
+            "labels": {"nodes": []},
+            "comments": {"totalCount": 0},
+            "subIssuesSummary": {"total": 0, "completed": 0},
+            "closedByPullRequestsReferences": {"nodes": []},
+        },
+        "status": {"name": "In progress"},
+        "iteration": {"title": iteration},
+    }
+
+
 def _stub_sprint(
-    monkeypatch: pytest.MonkeyPatch, *, viewer: str | None
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    viewer: str | None,
+    items: list[dict[str, Any]] | None = None,
 ) -> None:
     monkeypatch.setattr(config, "load_config", lambda *a, **k: _sprint_cfg())
     monkeypatch.setattr(gh, "current_login", _boom_current_login)
@@ -351,7 +444,7 @@ def _stub_sprint(
         ],
     )
     monkeypatch.setattr(
-        github, "fetch_sprint_items", lambda *a, **k: ([], viewer)
+        github, "fetch_sprint_items", lambda *a, **k: (items or [], viewer)
     )
 
 
@@ -366,3 +459,56 @@ def test_sprint_viewer_missing_raises_login_error(monkeypatch) -> None:
     with pytest.raises(PlateError) as excinfo:
         issues_cli.run(cli.parse_args(["issues", "--sprint"]))
     assert "Could not determine your GitHub login" in str(excinfo.value)
+
+
+def test_sprint_without_configured_board_raises_naming_config(monkeypatch) -> None:
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: config.Config())
+    monkeypatch.setattr(gh, "current_repo", lambda: "an-org/a-repo")
+    with pytest.raises(PlateError) as excinfo:
+        issues_cli.run(
+            cli.parse_args(["issues", "--sprint", "--config", "/tmp/plate.json"])
+        )
+    message = str(excinfo.value)
+    assert "No sprint board configured for an-org/a-repo" in message
+    assert "/tmp/plate.json" in message
+
+
+def test_sprint_empty_with_title_names_the_sprint(monkeypatch, capsys) -> None:
+    # An active iteration whose only items belong to another repo: the sprint
+    # exists but has nothing to show here — distinct from "no active sprint".
+    _stub_sprint(
+        monkeypatch,
+        viewer="me",
+        items=[_sprint_item(1, repo="an-org/other-repo")],
+    )
+    assert issues_cli.run(cli.parse_args(["issues", "--sprint"])) == 0
+    out = capsys.readouterr().out
+    assert "No issues in the current sprint (Sprint 7) for an-org/a-repo." in out
+
+
+def test_sprint_renders_table_with_items(monkeypatch, capsys) -> None:
+    _stub_sprint(monkeypatch, viewer="me", items=[_sprint_item(1)])
+    assert issues_cli.run(cli.parse_args(["issues", "--sprint"])) == 0
+    out = capsys.readouterr().out
+    assert "Sprint 7" in out
+    assert "Item 1" in out
+
+
+def test_sprint_markdown_format(monkeypatch, capsys) -> None:
+    _stub_sprint(monkeypatch, viewer="me", items=[_sprint_item(1)])
+    assert issues_cli.run(
+        cli.parse_args(["issues", "--sprint", "--format", "markdown"])
+    ) == 0
+    out = capsys.readouterr().out
+    assert "## Sprint 7 · current sprint" in out
+    assert "[#1](https://github.com/an-org/a-repo/issues/1)" in out
+
+
+def test_sprint_show_key_prints_sprint_key(monkeypatch, capsys) -> None:
+    _stub_sprint(monkeypatch, viewer="me", items=[_sprint_item(1)])
+    assert issues_cli.run(
+        cli.parse_args(["issues", "--sprint", "--show-key"])
+    ) == 0
+    out = capsys.readouterr().out
+    assert "Key" in out
+    assert "someone else's / unassigned row" in out
