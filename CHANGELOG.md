@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0](https://github.com/SimAin/gh-plate/compare/v1.3.0...v1.4.0) (2026-08-10)
+
+
+### Features
+
+* **retro:** 'plate retro' — a day-by-day panel of your own activity ([925320e](https://github.com/SimAin/gh-plate/commit/925320e19a5e1ad8672c853d7d8ac2f0c6886c98))
+* **retro:** 'plate retro' — per-owner panels of your own activity ([91fc476](https://github.com/SimAin/gh-plate/commit/91fc476aa113e6dc91343d84f0b7319fd9a66994))
+
 ## [1.3.0](https://github.com/SimAin/gh-plate/compare/v1.2.1...v1.3.0) (2026-08-06)
 
 
