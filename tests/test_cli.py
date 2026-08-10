@@ -99,6 +99,13 @@ def _boom_current_repo() -> str:
     raise AssertionError("current_repo() must not be called on the --owner path")
 
 
+def _boom_current_login() -> str | None:
+    raise AssertionError(
+        "current_login() must not be called — the viewer login arrives in "
+        "each path's own GraphQL query"
+    )
+
+
 def _stub_owner(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -106,22 +113,22 @@ def _stub_owner(
     total: int,
     cfg: config.Config | None = None,
     owner_type: str = "organization",
-    login: str = "me",
+    viewer: str | None = "me",
 ) -> dict[str, Any]:
     """Wire the owner path's I/O to in-memory stubs; record fetch arguments."""
     calls: dict[str, Any] = {}
     monkeypatch.setattr(
         config, "load_config", lambda *a, **k: cfg or config.Config()
     )
-    monkeypatch.setattr(gh, "current_login", lambda: login)
+    monkeypatch.setattr(gh, "current_login", _boom_current_login)
     monkeypatch.setattr(gh, "current_repo", _boom_current_repo)
     monkeypatch.setattr(gh, "resolve_owner_type", lambda owner: owner_type)
 
     def fake_fetch(
-        owner: str, otype: str, lg: str, limit: int, *, mine: bool
-    ) -> tuple[list[dict[str, Any]], int]:
-        calls.update(owner=owner, owner_type=otype, login=lg, limit=limit, mine=mine)
-        return issues, total
+        owner: str, otype: str, limit: int, *, assignee: str | None
+    ) -> tuple[list[dict[str, Any]], int, str | None]:
+        calls.update(owner=owner, owner_type=otype, limit=limit, assignee=assignee)
+        return issues, total, viewer
 
     monkeypatch.setattr(github, "fetch_owner_issues", fake_fetch)
     return calls
@@ -207,8 +214,32 @@ def test_owner_empty_mine_message(monkeypatch, capsys) -> None:
     assert issues_cli.run(
         cli.parse_args(["issues", "--owner", "an-org", "--mine"])
     ) == 0
-    assert calls["mine"] is True
+    assert calls["assignee"] == "@me"
     assert "No open issues assigned to you for an-org." in capsys.readouterr().out
+
+
+def test_owner_default_searches_without_assignee(monkeypatch) -> None:
+    calls = _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
+    assert issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
+    assert calls["assignee"] is None
+
+
+def test_owner_viewer_missing_raises_login_error(monkeypatch) -> None:
+    # The login for yours/others grouping rides on the fetch itself; when the
+    # response somehow lacks it, the old actionable auth error must survive.
+    _stub_owner(monkeypatch, issues=[_issue(1)], total=1, viewer=None)
+    with pytest.raises(PlateError) as excinfo:
+        issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"]))
+    assert "Could not determine your GitHub login" in str(excinfo.value)
+
+
+def test_owner_viewer_missing_with_empty_result_still_reports(
+    monkeypatch, capsys
+) -> None:
+    # An empty result needs no grouping, so no login is required to say so.
+    _stub_owner(monkeypatch, issues=[], total=0, viewer=None)
+    assert issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
+    assert "No open issues found for an-org." in capsys.readouterr().out
 
 
 def test_owner_truncation_note_limit_hit(monkeypatch, capsys) -> None:
@@ -253,3 +284,85 @@ def test_owner_show_key_prints_owner_key(monkeypatch, capsys) -> None:
     out = capsys.readouterr().out
     assert "Key" in out
     assert "most recently active repo" in out
+
+
+# --- the default (yours) view: viewer login rides on the fetch ----------------
+
+
+def _stub_yours(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    issues: list[dict[str, Any]],
+    total: int,
+    viewer: str | None = "me",
+) -> dict[str, Any]:
+    """Wire the default path's I/O to in-memory stubs; record fetch arguments."""
+    calls: dict[str, Any] = {}
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: config.Config())
+    monkeypatch.setattr(gh, "current_login", _boom_current_login)
+    monkeypatch.setattr(gh, "current_repo", lambda: "an-org/a-repo")
+
+    def fake_fetch(
+        repo: str, limit: int, *, assignee: str = "@me"
+    ) -> tuple[list[dict[str, Any]], int, str | None]:
+        calls.update(repo=repo, limit=limit, assignee=assignee)
+        return issues, total, viewer
+
+    monkeypatch.setattr(github, "fetch_assigned_issues", fake_fetch)
+    return calls
+
+
+def test_yours_flow_never_calls_current_login(monkeypatch, capsys) -> None:
+    # _boom_current_login would raise if the hot path still did the gh api
+    # user round trip; assignee:@me makes the concrete login unnecessary.
+    calls = _stub_yours(monkeypatch, issues=[_issue(1)], total=1)
+    assert issues_cli.run(cli.parse_args(["issues"])) == 0
+    assert calls["repo"] == "an-org/a-repo"
+    assert "Issue 1" in capsys.readouterr().out
+
+
+def test_yours_renders_even_without_viewer(monkeypatch, capsys) -> None:
+    # The yours view groups nothing by login, so a missing viewer is inert.
+    _stub_yours(monkeypatch, issues=[_issue(1)], total=1, viewer=None)
+    assert issues_cli.run(cli.parse_args(["issues"])) == 0
+    assert "Issue 1" in capsys.readouterr().out
+
+
+# --- sprint view: viewer login rides on the items fetch -----------------------
+
+
+def _sprint_cfg() -> config.Config:
+    project = config.ProjectConfig(owner="an-org", owner_type="organization", number=2)
+    return config.Config(projects={"an-org/a-repo": project})
+
+
+def _stub_sprint(
+    monkeypatch: pytest.MonkeyPatch, *, viewer: str | None
+) -> None:
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: _sprint_cfg())
+    monkeypatch.setattr(gh, "current_login", _boom_current_login)
+    monkeypatch.setattr(gh, "current_repo", lambda: "an-org/a-repo")
+    monkeypatch.setattr(
+        github,
+        "fetch_project_fields",
+        lambda *a, **k: [
+            {"name": "Iteration", "dataType": "ITERATION"},
+            {"name": "Status", "dataType": "SINGLE_SELECT"},
+        ],
+    )
+    monkeypatch.setattr(
+        github, "fetch_sprint_items", lambda *a, **k: ([], viewer)
+    )
+
+
+def test_sprint_flow_never_calls_current_login(monkeypatch, capsys) -> None:
+    _stub_sprint(monkeypatch, viewer="me")
+    assert issues_cli.run(cli.parse_args(["issues", "--sprint"])) == 0
+    assert "No active sprint" in capsys.readouterr().out
+
+
+def test_sprint_viewer_missing_raises_login_error(monkeypatch) -> None:
+    _stub_sprint(monkeypatch, viewer=None)
+    with pytest.raises(PlateError) as excinfo:
+        issues_cli.run(cli.parse_args(["issues", "--sprint"]))
+    assert "Could not determine your GitHub login" in str(excinfo.value)

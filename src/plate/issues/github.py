@@ -20,8 +20,13 @@ from .model import normalize_status, strip_emoji
 # One repo-wide query, filtered to the current user server-side. Sub-issue
 # fields (``parent``, ``subIssuesSummary``) are GraphQL-only — they are not in
 # the ``gh issue list --json`` REST field set — which is why this is GraphQL
-# from day one. ``gh.search_paginated`` sets ``$pageSize`` (at most 100) and
-# paginates via ``endCursor``.
+# from day one. ``gh.search_paginated_with_viewer`` sets ``$pageSize`` (at most
+# 100) and paginates via ``endCursor``.
+#
+# ``viewer { login }`` is a root field beside ``search``: the search string
+# filters with ``assignee:@me`` while the concrete login (which the owner and
+# sprint views need for yours/others grouping) comes back in the same round
+# trip — no separate ``gh api user`` call, no cache, no staleness.
 #
 # The ``parent`` chain is fetched three levels deep so the tree view can place
 # each owned issue under its (possibly un-owned) ancestors from this single
@@ -59,6 +64,7 @@ fragment NodeFields on Issue {
   repository { nameWithOwner }
 }
 query($q: String!, $pageSize: Int!, $endCursor: String) {
+  viewer { login }
   search(query: $q, type: ISSUE, first: $pageSize, after: $endCursor) {
     issueCount
     pageInfo { hasNextPage endCursor }
@@ -87,47 +93,57 @@ query($q: String!, $pageSize: Int!, $endCursor: String) {
 
 def _search_issues(
     query_str: str, limit: int, error_context: str
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, str | None]:
     """Run :data:`ISSUE_QUERY` against ``query_str``, paginating as needed.
 
-    A thin delegate to :func:`plate.core.gh.search_paginated` (the shared
-    cursor loop, now generalised into core so the PR owner view can reuse it),
-    binding the issue-domain GraphQL document. Shared by
-    :func:`fetch_assigned_issues` (repo-scoped) and :func:`fetch_owner_issues`
-    (owner-scoped) — both are the same Issues search under ``ISSUE_QUERY``,
-    differing only in the qualifiers they build. ``error_context`` is
-    interpolated into the failure message (e.g. a repo or an owner name).
+    A thin delegate to :func:`plate.core.gh.search_paginated_with_viewer`
+    (the shared cursor loop), binding the issue-domain GraphQL document.
+    Shared by :func:`fetch_assigned_issues` (repo-scoped) and
+    :func:`fetch_owner_issues` (owner-scoped) — both are the same Issues
+    search under ``ISSUE_QUERY``, differing only in the qualifiers they
+    build. ``error_context`` is interpolated into the failure message
+    (e.g. a repo or an owner name).
 
-    Returns ``(issues, total)`` where ``total`` is the server's own count
-    (used only for the truncation note) — see :func:`fetch_owner_issues` for
-    why this can exceed what pagination ever delivers.
+    Returns ``(issues, total, viewer)`` where ``total`` is the server's own
+    count (used only for the truncation note) — see :func:`fetch_owner_issues`
+    for why this can exceed what pagination ever delivers — and ``viewer`` is
+    the authenticated login from the document's ``viewer { login }`` root.
     """
-    return gh.search_paginated(ISSUE_QUERY, query_str, limit, error_context)
+    return gh.search_paginated_with_viewer(
+        ISSUE_QUERY, query_str, limit, error_context
+    )
 
 
 def fetch_assigned_issues(
-    repo: str, login: str, limit: int
-) -> tuple[list[dict[str, Any]], int]:
-    """Open issues assigned to ``login`` in ``repo``, paginating as needed.
+    repo: str, limit: int, *, assignee: str = "@me"
+) -> tuple[list[dict[str, Any]], int, str | None]:
+    """Open issues assigned to ``assignee`` in ``repo``, paginating as needed.
 
-    Returns ``(issues, total_assigned)`` where ``total_assigned`` is the
-    server's own count (used only for the truncation note).
+    ``assignee`` defaults to GitHub's ``@me`` search token, so no concrete
+    login is needed up front — the viewer's login comes back in the same
+    round trip instead. An explicit login (a future ``--assignee``) slots in
+    unchanged as ``assignee:LOGIN``.
+
+    Returns ``(issues, total_assigned, viewer)`` where ``total_assigned`` is
+    the server's own count (used only for the truncation note) and ``viewer``
+    is the authenticated login.
     """
-    query_str = f"repo:{repo} is:issue is:open assignee:{login}"
+    query_str = f"repo:{repo} is:issue is:open assignee:{assignee}"
     return _search_issues(query_str, limit, repo)
 
 
 def owner_search_query(
-    owner: str, owner_type: str, login: str, *, mine: bool
+    owner: str, owner_type: str, *, assignee: str | None = None
 ) -> str:
     """The GitHub Issues search string for every open issue across ``owner``.
 
     ``owner_type`` (``"organization"`` or ``"user"`` — the same vocabulary as
     ``config.ProjectConfig.owner_type``) picks the qualifier: an organization
     is searched with ``org:OWNER``, a user account with ``user:OWNER``. When
-    ``mine`` is set, an ``assignee:LOGIN`` term narrows the search to issues
-    assigned to ``login``, mirroring :func:`fetch_assigned_issues`'s
-    single-repo query but scoped to every repo the owner has instead of one.
+    ``assignee`` is given (``@me`` for the ``--mine`` flag, or a concrete
+    login), an ``assignee:`` term narrows the search to issues assigned to
+    them, mirroring :func:`fetch_assigned_issues`'s single-repo query but
+    scoped to every repo the owner has instead of one.
 
     ``archived:false`` excludes archived repos by design — an archived repo
     is done, and its issues are not live work for an owner-wide "what needs
@@ -141,29 +157,31 @@ def owner_search_query(
     query_str = (
         f"{qualifier}:{owner} is:issue is:open archived:false sort:updated-desc"
     )
-    if mine:
-        query_str += f" assignee:{login}"
+    if assignee:
+        query_str += f" assignee:{assignee}"
     return query_str
 
 
 def fetch_owner_issues(
-    owner: str, owner_type: str, login: str, limit: int, *, mine: bool
-) -> tuple[list[dict[str, Any]], int]:
+    owner: str, owner_type: str, limit: int, *, assignee: str | None = None
+) -> tuple[list[dict[str, Any]], int, str | None]:
     """Open issues across every repo ``owner`` has, paginating as needed.
 
     Builds the search string via :func:`owner_search_query` and delegates to
     :func:`_search_issues` — the same ``ISSUE_QUERY`` shape as the single-repo
     view, just scoped to an owner instead of one ``repo:``.
 
-    Returns ``(issues, total)`` where ``total`` is the server's own count.
-    GitHub's search API caps any single query at 1000 results, so for a large
-    owner ``total`` can exceed what pagination can ever retrieve — it is not
-    only ever the true count clipped by ``limit``. The CLI (PR 3) compares
-    ``len(issues) < total`` to report "showing X of Y" honestly regardless of
-    which ceiling — ``limit`` or GitHub's own 1000-result cap — did the
-    truncating.
+    Returns ``(issues, total, viewer)``. ``viewer`` is the authenticated
+    login from the query's ``viewer { login }`` root — the owner view needs
+    it for yours/others grouping even when ``assignee`` is unset. ``total``
+    is the server's own count. GitHub's search API caps any single query at
+    1000 results, so for a large owner ``total`` can exceed what pagination
+    can ever retrieve — it is not only ever the true count clipped by
+    ``limit``. The CLI compares ``len(issues) < total`` to report "showing X
+    of Y" honestly regardless of which ceiling — ``limit`` or GitHub's own
+    1000-result cap — did the truncating.
     """
-    query_str = owner_search_query(owner, owner_type, login, mine=mine)
+    query_str = owner_search_query(owner, owner_type, assignee=assignee)
     return _search_issues(query_str, limit, owner)
 
 
@@ -175,6 +193,9 @@ def fetch_owner_issues(
 # Issue (the same fields the yours-view uses) and ``fieldValueByName`` reads the
 # board's Status + Iteration values. The board can span repos, so the model
 # filters items to the requested repo; PR/draft items are dropped there too.
+# ``viewer { login }`` rides along as a second root field — the sprint view
+# groups yours/others by the concrete login, fetched here in the same round
+# trip instead of via a separate ``gh api user`` call.
 def _sprint_query(
     owner: str, owner_type: str, number: int, sprint_field: str, status_field: str
 ) -> str:
@@ -187,6 +208,7 @@ def _sprint_query(
     sprint_lit = json.dumps(sprint_field)
     return f"""
 query($q: String!, $endCursor: String) {{
+  viewer {{ login }}
   {root}(login: {owner_lit}) {{
     projectV2(number: {number}) {{
       items(first: 100, after: $endCursor, query: $q) {{
@@ -257,12 +279,18 @@ def fetch_sprint_items(
     number: int,
     sprint_field: str,
     status_field: str,
-) -> list[dict[str, Any]]:
-    """Current-sprint items of a Projects v2 board, paginating as needed."""
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Current-sprint items of a Projects v2 board, paginating as needed.
+
+    Returns ``(items, viewer)`` — ``viewer`` is the authenticated login from
+    the query's ``viewer { login }`` root, taken from whichever page carries
+    it (every page does; last one wins).
+    """
     query_str = _sprint_query(owner, owner_type, number, sprint_field, status_field)
     q = sprint_filter(sprint_field)
     root_key = "organization" if owner_type == "organization" else "user"
     items: list[dict[str, Any]] = []
+    viewer: str | None = None
     cursor: str | None = None
 
     while True:
@@ -287,7 +315,13 @@ def fetch_sprint_items(
         if payload.get("errors"):
             _raise_for_graphql_errors(payload["errors"])
 
-        root = (payload.get("data") or {}).get(root_key) or {}
+        data = payload.get("data") or {}
+        viewer_node = data.get("viewer")
+        if isinstance(viewer_node, dict):
+            login = viewer_node.get("login")
+            if isinstance(login, str) and login:
+                viewer = login
+        root = data.get(root_key) or {}
         project = root.get("projectV2")
         if project is None:
             raise gh.PlateError(
@@ -298,11 +332,11 @@ def fetch_sprint_items(
         items.extend(node for node in (connection.get("nodes") or []) if node)
 
         if len(items) >= SPRINT_ITEM_CAP:
-            return items[:SPRINT_ITEM_CAP]
+            return items[:SPRINT_ITEM_CAP], viewer
         page = connection.get("pageInfo") or {}
         cursor = page.get("endCursor")
         if not page.get("hasNextPage") or not cursor:
-            return items
+            return items, viewer
 
 
 # Board-field validation. Before fetching sprint items we ask the board what

@@ -150,6 +150,19 @@ def _progress_clear() -> None:
 def search_paginated(
     query: str, query_str: str, limit: int, error_context: str
 ) -> tuple[list[dict[str, Any]], int]:
+    """:func:`search_paginated_with_viewer` minus the viewer login — for
+    callers whose document requests no ``viewer`` root, or that resolve the
+    login elsewhere. Same contract otherwise.
+    """
+    nodes, total, _viewer = search_paginated_with_viewer(
+        query, query_str, limit, error_context
+    )
+    return nodes, total
+
+
+def search_paginated_with_viewer(
+    query: str, query_str: str, limit: int, error_context: str
+) -> tuple[list[dict[str, Any]], int, str | None]:
     """Run a GraphQL ``search`` document against ``query_str``, paginating.
 
     The shared engine behind every owner/repo-scoped GitHub search across
@@ -167,7 +180,14 @@ def search_paginated(
     ``error_context`` is interpolated into the failure message (a repo or an
     owner name) so each caller's error stays specific to what it was fetching.
 
-    Returns ``(nodes, total)`` where ``total`` is the server's own
+    The document may also declare ``viewer { login }`` as a root field (a
+    GraphQL document can combine it with ``search``): the authenticated login
+    then rides along on every page at zero extra latency, letting callers
+    filter with ``@me`` yet still learn the concrete login without a separate
+    ``gh api user`` round trip. It is taken from whichever page carries it and
+    returned third — ``None`` when the document never requested it.
+
+    Returns ``(nodes, total, viewer)`` where ``total`` is the server's own
     ``issueCount`` (used only for the truncation note). GitHub caps any single
     search at 1000 results, so for a large owner ``total`` can exceed what
     pagination ever delivers — it is not only the true count clipped by
@@ -178,6 +198,7 @@ def search_paginated(
     """
     nodes: list[dict[str, Any]] = []
     total = 0
+    viewer: str | None = None
     cursor: str | None = None
     page_cap = _MAX_PAGE_SIZE
 
@@ -234,15 +255,21 @@ def search_paginated(
                     "GraphQL error: " + json.dumps(payload["errors"])
                 )
 
-            search = (payload.get("data") or {}).get("search") or {}
+            data = payload.get("data") or {}
+            viewer_node = data.get("viewer")
+            if isinstance(viewer_node, dict):
+                login = viewer_node.get("login")
+                if isinstance(login, str) and login:
+                    viewer = login
+            search = data.get("search") or {}
             total = search.get("issueCount", total)
             nodes.extend(node for node in (search.get("nodes") or []) if node)
 
             if len(nodes) >= limit:
-                return nodes[:limit], total
+                return nodes[:limit], total, viewer
             page = search.get("pageInfo") or {}
             cursor = page.get("endCursor")
             if not page.get("hasNextPage") or not cursor:
-                return nodes, total
+                return nodes, total, viewer
     finally:
         _progress_clear()

@@ -60,6 +60,13 @@ def test_sprint_query_uses_org_root_and_interpolates_fields() -> None:
     assert 'query: $q' in query
 
 
+def test_sprint_query_requests_viewer_login() -> None:
+    # The sprint view groups yours/others by the concrete login — fetched as a
+    # second root field in the same round trip, not via a gh api user call.
+    query = github._sprint_query("an-org", "organization", 2, "Iteration", "Status")
+    assert "viewer { login }" in query
+
+
 def test_sprint_query_uses_user_root() -> None:
     query = github._sprint_query("a-user", "user", 5, "Sprint", "Column")
     assert 'user(login: "a-user")' in query
@@ -213,7 +220,7 @@ def test_validate_board_fields_rejects_unknown_status_order_entry() -> None:
 def test_owner_search_query_uses_owner_type_qualifier(
     owner_type: str, qualifier: str
 ) -> None:
-    query = github.owner_search_query("acme", owner_type, "alice", mine=False)
+    query = github.owner_search_query("acme", owner_type)
     assert query.startswith(f"{qualifier}:acme ")
     assert "assignee:" not in query
 
@@ -222,20 +229,26 @@ def test_owner_search_query_uses_owner_type_qualifier(
 def test_owner_search_query_always_excludes_archived_and_sorts(
     owner_type: str,
 ) -> None:
-    query = github.owner_search_query("acme", owner_type, "alice", mine=False)
+    query = github.owner_search_query("acme", owner_type)
     assert "archived:false" in query
     assert "sort:updated-desc" in query
     assert "is:issue" in query
     assert "is:open" in query
 
 
-def test_owner_search_query_mine_appends_assignee_filter() -> None:
-    query = github.owner_search_query("acme", "organization", "alice", mine=True)
+def test_owner_search_query_assignee_me_appends_filter() -> None:
+    # --mine narrows with the @me token; no concrete login is needed to search.
+    query = github.owner_search_query("acme", "organization", assignee="@me")
+    assert query.endswith("assignee:@me")
+
+
+def test_owner_search_query_explicit_assignee_appends_login() -> None:
+    query = github.owner_search_query("acme", "organization", assignee="alice")
     assert query.endswith("assignee:alice")
 
 
-def test_owner_search_query_mine_false_omits_assignee_filter() -> None:
-    query = github.owner_search_query("acme", "organization", "alice", mine=False)
+def test_owner_search_query_no_assignee_omits_filter() -> None:
+    query = github.owner_search_query("acme", "organization", assignee=None)
     assert "assignee" not in query
 
 
@@ -300,18 +313,20 @@ def _search_payload(
     *,
     has_next: bool = False,
     end_cursor: str | None = None,
+    viewer: str | None = "hub-user",
 ) -> str:
-    return json.dumps(
-        {
-            "data": {
-                "search": {
-                    "issueCount": issue_count,
-                    "pageInfo": {"hasNextPage": has_next, "endCursor": end_cursor},
-                    "nodes": nodes,
-                }
-            }
+    """A gh GraphQL search response page. ``viewer`` mimics the real query's
+    ``viewer { login }`` root (present on every page); ``None`` omits it."""
+    data: dict[str, Any] = {
+        "search": {
+            "issueCount": issue_count,
+            "pageInfo": {"hasNextPage": has_next, "endCursor": end_cursor},
+            "nodes": nodes,
         }
-    )
+    }
+    if viewer is not None:
+        data["viewer"] = {"login": viewer}
+    return json.dumps({"data": data})
 
 
 def _paged_fake_run(pages: list[str]) -> Any:
@@ -333,9 +348,48 @@ def test_fetch_assigned_issues_single_page(monkeypatch: pytest.MonkeyPatch) -> N
         "run_command",
         _paged_fake_run([_search_payload(2, [{"number": 1}, {"number": 2}])]),
     )
-    issues, total = github.fetch_assigned_issues("an-org/a-repo", "alice", 10)
+    issues, total, viewer = github.fetch_assigned_issues("an-org/a-repo", 10)
     assert [i["number"] for i in issues] == [1, 2]
     assert total == 2
+    assert viewer == "hub-user"
+
+
+def test_fetch_assigned_issues_searches_assignee_me(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The default search needs no concrete login: @me filters server-side while
+    # viewer { login } returns the real login in the same round trip.
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        captured["args"] = args
+        return subprocess.CompletedProcess(
+            args, 0, stdout=_search_payload(0, []), stderr=""
+        )
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    github.fetch_assigned_issues("an-org/a-repo", 10)
+
+    q_arg = next(a for a in captured["args"] if a.startswith("q="))
+    assert q_arg == "q=repo:an-org/a-repo is:issue is:open assignee:@me"
+
+
+def test_fetch_assigned_issues_explicit_assignee(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        captured["args"] = args
+        return subprocess.CompletedProcess(
+            args, 0, stdout=_search_payload(0, []), stderr=""
+        )
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    github.fetch_assigned_issues("an-org/a-repo", 10, assignee="alice")
+
+    q_arg = next(a for a in captured["args"] if a.startswith("q="))
+    assert q_arg.endswith("assignee:alice")
 
 
 def test_fetch_assigned_issues_gh_failure_raises_with_repo(
@@ -346,7 +400,7 @@ def test_fetch_assigned_issues_gh_failure_raises_with_repo(
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     with pytest.raises(gh.PlateError, match="an-org/a-repo"):
-        github.fetch_assigned_issues("an-org/a-repo", "alice", 10)
+        github.fetch_assigned_issues("an-org/a-repo", 10)
 
 
 def test_fetch_owner_issues_issues_the_expected_query(
@@ -361,10 +415,10 @@ def test_fetch_owner_issues_issues_the_expected_query(
         )
 
     monkeypatch.setattr(gh, "run_command", fake_run)
-    github.fetch_owner_issues("acme", "organization", "alice", 10, mine=True)
+    github.fetch_owner_issues("acme", "organization", 10, assignee="@me")
 
     q_arg = next(a for a in captured["args"] if a.startswith("q="))
-    expected = github.owner_search_query("acme", "organization", "alice", mine=True)
+    expected = github.owner_search_query("acme", "organization", assignee="@me")
     assert q_arg == f"q={expected}"
 
 
@@ -380,12 +434,28 @@ def test_fetch_owner_issues_paginates_across_pages(
     fake_run = _paged_fake_run(pages)
     monkeypatch.setattr(gh, "run_command", fake_run)
 
-    issues, total = github.fetch_owner_issues(
-        "acme", "organization", "alice", 10, mine=False
-    )
+    issues, total, viewer = github.fetch_owner_issues("acme", "organization", 10)
     assert [i["number"] for i in issues] == [1, 2, 3]
     assert total == 3
+    assert viewer == "hub-user"
     assert fake_run.calls["n"] == 2  # type: ignore[attr-defined]
+
+
+def test_fetch_owner_issues_viewer_from_whichever_page_has_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The viewer field rides on every page in reality; the merge must not
+    # depend on any particular page carrying it.
+    pages = [
+        _search_payload(
+            2, [{"number": 1}], has_next=True, end_cursor="CURSOR1", viewer=None
+        ),
+        _search_payload(2, [{"number": 2}]),
+    ]
+    monkeypatch.setattr(gh, "run_command", _paged_fake_run(pages))
+
+    _issues, _total, viewer = github.fetch_owner_issues("acme", "organization", 10)
+    assert viewer == "hub-user"
 
 
 def test_fetch_owner_issues_truncates_at_limit(
@@ -405,9 +475,7 @@ def test_fetch_owner_issues_truncates_at_limit(
         )
 
     monkeypatch.setattr(gh, "run_command", fake_run)
-    issues, total = github.fetch_owner_issues(
-        "acme", "organization", "alice", 5, mine=False
-    )
+    issues, total, _viewer = github.fetch_owner_issues("acme", "organization", 5)
     assert len(issues) == 5
     assert total == 100  # server total can exceed what limit lets through
 
@@ -420,7 +488,7 @@ def test_fetch_owner_issues_gh_failure_raises_with_owner(
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     with pytest.raises(gh.PlateError, match="acme"):
-        github.fetch_owner_issues("acme", "organization", "alice", 5, mine=False)
+        github.fetch_owner_issues("acme", "organization", 5)
 
 
 # --- search_paginated transient-5xx handling (GitHub search timeouts) -------
@@ -493,6 +561,44 @@ def test_search_paginated_non_transient_failure_does_not_retry(
     monkeypatch.setattr(gh, "run_command", fake_run)
     with pytest.raises(gh.PlateError, match="Bad credentials"):
         gh.search_paginated("QUERY", "q-str", 500, "acme")
+
+
+def test_search_paginated_with_viewer_returns_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_run = _flaky_fake_run(0, _search_payload(1, [{"number": 7}]))
+    monkeypatch.setattr(gh, "run_command", fake_run)
+
+    nodes, total, viewer = gh.search_paginated_with_viewer(
+        "QUERY", "q-str", 500, "acme"
+    )
+
+    assert [n["number"] for n in nodes] == [7]
+    assert total == 1
+    assert viewer == "hub-user"
+
+
+def test_search_paginated_with_viewer_none_when_document_lacks_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_run = _flaky_fake_run(0, _search_payload(1, [{"number": 7}], viewer=None))
+    monkeypatch.setattr(gh, "run_command", fake_run)
+
+    _nodes, _total, viewer = gh.search_paginated_with_viewer(
+        "QUERY", "q-str", 500, "acme"
+    )
+    assert viewer is None
+
+
+def test_search_paginated_keeps_two_tuple_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The prs owner view still consumes the viewer-less wrapper unchanged.
+    fake_run = _flaky_fake_run(0, _search_payload(1, [{"number": 7}]))
+    monkeypatch.setattr(gh, "run_command", fake_run)
+
+    result = gh.search_paginated("QUERY", "q-str", 500, "acme")
+    assert result == ([{"number": 7}], 1)
 
 
 def test_search_paginated_requests_only_what_limit_needs(
@@ -577,6 +683,57 @@ def test_search_paginated_is_silent_when_stderr_is_not_a_tty(
     gh.search_paginated("QUERY", "q-str", 500, "acme")
 
     assert stderr.getvalue() == ""
+
+
+# --- fetch_sprint_items: items + viewer login --------------------------------
+
+
+def _sprint_payload(
+    nodes: list[dict[str, Any]],
+    *,
+    viewer: str | None = "hub-user",
+    has_next: bool = False,
+    end_cursor: str | None = None,
+) -> str:
+    data: dict[str, Any] = {
+        "organization": {
+            "projectV2": {
+                "items": {
+                    "pageInfo": {"hasNextPage": has_next, "endCursor": end_cursor},
+                    "nodes": nodes,
+                }
+            }
+        }
+    }
+    if viewer is not None:
+        data["viewer"] = {"login": viewer}
+    return json.dumps({"data": data})
+
+
+def test_fetch_sprint_items_returns_items_and_viewer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _sprint_payload([{"content": {"__typename": "Issue", "number": 1}}])
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout(payload))
+
+    items, viewer = github.fetch_sprint_items(
+        "acme", "organization", 2, "Iteration", "Status"
+    )
+    assert len(items) == 1
+    assert viewer == "hub-user"
+
+
+def test_fetch_sprint_items_viewer_none_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _sprint_payload([], viewer=None)
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout(payload))
+
+    items, viewer = github.fetch_sprint_items(
+        "acme", "organization", 2, "Iteration", "Status"
+    )
+    assert items == []
+    assert viewer is None
 
 
 # --- fetch_sprint_items / fetch_project_fields: GraphQL error handling ------

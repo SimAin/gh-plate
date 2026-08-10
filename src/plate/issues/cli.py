@@ -3,7 +3,7 @@ you, across an owner's repositories, or a repo's current sprint board.
 
 Thin wiring layer: parse the ``issues`` flags, ask :mod:`plate.issues.github`
 for data, hand it to :mod:`plate.issues.model` to normalize and
-:mod:`plate.issues.render` to format. Shared I/O (repo/login/owner-type
+:mod:`plate.issues.render` to format. Shared I/O (repo/owner-type
 resolution) comes from :mod:`plate.core.gh`; the JSON config from
 :mod:`plate.core.config`. All environment failures arrive as
 :class:`~plate.core.gh.PlateError`; :func:`plate.cli.main` turns them into a
@@ -122,6 +122,21 @@ def _use_color(args: argparse.Namespace) -> bool:
     )
 
 
+def _require_login(viewer: str | None) -> str:
+    """The viewer login carried by a path's own GraphQL fetch, or a clean error.
+
+    Each fetch requests ``viewer { login }`` in its main query, so no separate
+    ``gh api user`` round trip is needed; a missing login still fails with the
+    actionable message on the paths that group by it.
+    """
+    if viewer is None:
+        raise PlateError(
+            "Could not determine your GitHub login (is `gh` authenticated?).\n"
+            "plate groups by assignee and cannot run without it."
+        )
+    return viewer
+
+
 def run(args: argparse.Namespace) -> int:
     if args.config_path:
         print(args.config or config.config_path())
@@ -140,28 +155,21 @@ def run(args: argparse.Namespace) -> int:
 
     cfg = config.load_config(args.config)
 
-    login = gh.current_login()
-    if login is None:
-        raise PlateError(
-            "Could not determine your GitHub login (is `gh` authenticated?).\n"
-            "plate groups by assignee and cannot run without it."
-        )
-
     if args.owner:
         # The owner view is not tied to a checkout, so it must not require a git
         # repo — never call gh.current_repo() on this path (#43).
-        return _run_owner(args, cfg, login)
+        return _run_owner(args, cfg)
 
     repo = args.repo or gh.current_repo()
     if args.sprint:
-        return _run_sprint(args, cfg, repo, login)
-    return _run_yours(args, cfg, repo, login)
+        return _run_sprint(args, cfg, repo)
+    return _run_yours(args, cfg, repo)
 
 
-def _run_yours(
-    args: argparse.Namespace, cfg: config.Config, repo: str, login: str
-) -> int:
-    issues, total = github.fetch_assigned_issues(repo, login, args.limit)
+def _run_yours(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
+    # assignee:@me filters server-side without a concrete login, and this view
+    # groups nothing by it, so the viewer riding along goes unused here.
+    issues, total, _viewer = github.fetch_assigned_issues(repo, args.limit)
     if not issues:
         print(f"No open issues assigned to you in {repo}.")
         return 0
@@ -188,7 +196,7 @@ def _run_yours(
     return 0
 
 
-def _run_owner(args: argparse.Namespace, cfg: config.Config, login: str) -> int:
+def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
     resolved = cfg.resolve_owner(args.owner)
     # Show the alias mapping only when one actually fired (the resolver folds
     # case, so compare after resolution); a literal owner shows just its name.
@@ -210,8 +218,8 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config, login: str) -> int:
             ) from exc
         raise
 
-    issues, total = github.fetch_owner_issues(
-        resolved, owner_type, login, args.limit, mine=args.mine
+    issues, total, viewer = github.fetch_owner_issues(
+        resolved, owner_type, args.limit, assignee="@me" if args.mine else None
     )
     if not issues:
         if args.mine:
@@ -228,7 +236,7 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config, login: str) -> int:
         now=datetime.now(UTC),
         stale_days=args.stale_days,
         repo=resolved,
-        login=login,
+        login=_require_login(viewer),
     )
     sections = group_by_repo(index)
 
@@ -263,9 +271,7 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config, login: str) -> int:
     return 0
 
 
-def _run_sprint(
-    args: argparse.Namespace, cfg: config.Config, repo: str, login: str
-) -> int:
+def _run_sprint(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
     project = cfg.project_for(repo)
     if project is None:
         raise PlateError(
@@ -286,7 +292,7 @@ def _run_sprint(
         fields, project.sprint_field, project.status_field, project.status_order
     )
 
-    items = github.fetch_sprint_items(
+    items, viewer = github.fetch_sprint_items(
         project.owner,
         project.owner_type,
         project.number,
@@ -295,7 +301,7 @@ def _run_sprint(
     )
     view = build_sprint_view(
         items,
-        login=login,
+        login=_require_login(viewer),
         repo=repo,
         now=datetime.now(UTC),
         stale_days=args.stale_days,
