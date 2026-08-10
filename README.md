@@ -87,7 +87,7 @@ In `--format markdown` the marker carries the PR number and state word
 
 The other columns carry the detail (for your own issues; blank on context rows):
 
-- **Age** — time since last update (`6h`, `3d`, `4w`, `5mo`, `2y`), rose once stale.
+- **Age** — time since last update (`3d`, `4w`, `5mo`, `2y`), rose once stale.
 - **Labels** — the raw label set, dimmed, `:emoji:` shortcodes stripped. Whole
   labels are packed into the column with a `+N` count for any that don't fit
   (e.g. `security +1`), so it stays a clean context indicator. `--format
