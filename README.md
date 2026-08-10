@@ -216,6 +216,52 @@ excluded, results are sorted most-recently-active first, and a truncation note
 reports `showing N of M` whenever `--limit` or GitHub's 1000-results-per-search
 cap clipped the table.
 
+## Retro view (`plate retro`)
+
+Where every other view looks at the work, `plate retro` looks at **you**: a
+day-by-day retrospective of your own GitHub activity, private repositories
+included, **split into one panel per repository owner** so work-org and
+personal activity read separately. The glance it exists for: *"I haven't
+reviewed anything in two days… ah, because I was heads-down committing —
+let's review something today."*
+
+```sh
+plate retro              # last 14 days
+plate retro --days 21    # 7-30
+```
+
+```
+── acme-corp · last 14 days ────────────────────────────────────────
+               S  S  M  T  W  T  F  S  S  M  T  W  T  F    Σ
+   reviews     ·  ·  2  1  ·  3  1  ·  ·  2  1  1  ·  ·   11   last 2d ago
+   commits     ·  ·  1  ·  2  ·  ·  ·  ·  ·  4  6  5  3   21   today
+   opened      ·  ·  ·  1  ·  ·  ·  ·  ·  ·  ·  1  ·  ·    2   last 2d ago
+── SimAin · last 14 days ───────────────────────────────────────────
+               S  S  M  T  W  T  F  S  S  M  T  W  T  F    Σ
+   reviews     ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·    0   none in 14d
+   commits     ·  ·  ·  ·  3  ·  ·  ·  ·  ·  ·  2  ·  1    6   today
+   opened      ·  ·  ·  ·  1  ·  ·  ·  ·  ·  ·  ·  ·  ·    1   last 9d ago
+```
+
+Owners appear most active first. Columns are days (weekday ruler, weekends
+dimmed, today bold, rightmost = today), digits are counts, `Σ` is the window
+total, and each row ends with the literal answer to "when did I last…?". The
+one tint is the gold nudge on a reviews row that has been quiet for two days
+or more.
+
+Each channel reads the best source that can see private activity — reviews
+from your own events feed, PRs opened from search, and **commits from your
+push events expanded through the compare API**, so branch work counts with
+its real magnitude on the day it happened, not the day it merged. It needs
+no checkout and runs from anywhere `gh` is authenticated.
+
+Honesty notes when a source hits its limits: GitHub keeps only your 300 most
+recent events (review/commit counts for early days may be undercounted), a
+push whose history was rewritten can't be expanded (counted as one commit on
+its push day), and search caps at 1000 results. Each case prints a note
+rather than passing gaps off as rest. `--format markdown` prints a compact
+per-owner `channel | total | last` table instead of the grid.
+
 ## Sprint view (`--sprint`)
 
 Where the default view is *"what's on my plate?"*, `plate issues --sprint` is

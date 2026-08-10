@@ -351,6 +351,57 @@ D11.
 
 ---
 
+## D13 — `plate retro`: your own activity, split by owner, on the sources that can see it (issue #81)
+
+**Decision:** A third domain, `plate/retro/`, renders a day-by-day panel of
+the viewer's own activity — **reviews / commits / PRs opened** — over a 14-day
+window (`--days`, bounded 7-30), as **one self-contained panel per repository
+owner** (most active first), so a work org and personal repos read separately.
+It is a **subcommand, not a `prs` flag**: different data, different subject
+(you, not the work), different tense (retrospective), and it needs no
+checkout — repo resolution is never touched. Each channel reads the best
+source that can see private activity: reviews from the REST **events feed**,
+PRs opened from **issue search** (`is:pr author:LOGIN created:>=`), and
+commits from the feed's **push events expanded through the compare API** —
+one `base...head` range per (repo, branch) chain, fetched in parallel,
+keeping only commits the viewer authored, deduped by sha, bucketed by their
+real committer dates.
+
+**Why not the obvious sources — both probed live and rejected:**
+
+- **GraphQL `contributionsCollection`** (the issue's original spec): its
+  itemized connections expose *public* activity only — private work collapses
+  into an opaque `restrictedContributionsCount` even for the authenticated
+  user querying themselves (probed: totals 0, restricted 69, on an account
+  whose work is all private). A retro blind to private work is an empty panel.
+- **Commit search** (`search/commits`): sees private repos, but indexes
+  **default branches only** — probed: 8 in-window pushes to work feature
+  branches, 0 in-window search results. Branch work would stay invisible
+  until merge, which defeats "I did a bunch of commits *today*".
+- A pushes-per-day channel (no expansion) was built first and rejected in
+  review: pushes flatten magnitude, and magnitude is the point.
+
+**Panel:** per owner — divider, weekday ruler (weekends dim, today bold),
+digits per active day with dim `·` for quiet ones (cells cap at 99, the `Σ`
+totals column doesn't), and a per-row `today` / `last Nd ago` / `none in Nd`
+annotation. The one tint is the gold nudge on a reviews row quiet ≥ 2 days —
+the motivating glance; commits/opened are nobody's duty and stay dim.
+Markdown gets a `## OWNER` heading + `channel | total | last` table per
+section.
+
+**Consequence & accepted limits:** the boundary test covers the new domain
+automatically (it imports only `plate.core`; the compare fan-out uses a
+stdlib thread pool). Reviews and commits inherit the events feed's caps (300
+events / 90 days): when a capped feed can't reach the window's start, a
+stderr note says early days may be undercounted rather than passing them off
+as rest. A compare that can't resolve (rewritten history) falls back to one
+commit per push on the push's day — counted, and reported via its own note.
+Commits with an email not linked to the GitHub account don't match the
+author filter and are dropped; rebase-rewritten shas can count twice across
+branches. Day buckets are UTC.
+
+---
+
 ## Standing decisions carried from the architecture discussion
 
 - **Standalone, not a shared package.** The GraphQL fetch layer is specific enough
