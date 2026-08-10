@@ -111,9 +111,8 @@ PR_TIMELINE_QUERY = _PR_QUERY_TEMPLATE.replace("__EXTRA_FIELDS__", TIMELINE_FIEL
 # fields the repo view's normaliser reads (so ``model.normalize_rows`` consumes
 # both shapes unchanged), plus ``repository { nameWithOwner }`` — every node in
 # an owner search can live in a different repo, and that field is what
-# ``group_by_repo`` sections on. The viewer's login is *not* fetched here (a
-# search has no ``viewer`` root); the CLI passes it from ``gh.current_login()``,
-# mirroring the issues owner path.
+# ``group_by_repo`` sections on. The viewer's login is *not* fetched here;
+# the CLI passes it from ``gh.current_login()``.
 PR_OWNER_QUERY = """
 fragment PrFields on PullRequest {
   number
