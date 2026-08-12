@@ -26,6 +26,14 @@ def opened(days_ago: int, repo: str = "acme/widget") -> dict[str, Any]:
     }
 
 
+def closed(days_ago: int, repo: str = "acme/widget") -> dict[str, Any]:
+    return {
+        "repository_url": f"https://api.github.com/repos/{repo}",
+        "closed_at": _iso(days_ago),
+        "merged": False,
+    }
+
+
 def review(days_ago: int, repo: str = "acme/widget") -> dict[str, Any]:
     return {
         "type": "PullRequestReviewEvent",
@@ -164,7 +172,7 @@ def test_failed_compare_falls_back_to_one_commit_per_push() -> None:
 
 def test_channels_come_in_display_order() -> None:
     section = sections(commits=[commit_ref(1)])[0]
-    assert [c.label for c in section.channels] == ["reviews", "commits", "opened"]
+    assert [c.label for c in section.channels] == ["reviews", "commits", "opened", "closed"]
 
 
 def test_activity_splits_by_repository_owner() -> None:
@@ -227,13 +235,59 @@ def test_last_days_edges() -> None:
 def test_totals_equal_the_sum_of_the_cells_and_the_section_total() -> None:
     built = sections(
         commits=[commit_ref(1), commit_ref(6)],
-        prs=[opened(2)],
+        prs=[opened(2), closed(1)],
         events=[review(0), review(1)],
     )
     section = built[0]
     for channel in section.channels:
         assert channel.total == sum(channel.counts)
     assert section.total == sum(channel.total for channel in section.channels)
+
+
+def test_closed_channel_buckets_by_day() -> None:
+    # Test that closed PRs are bucketed by day correctly
+    built = sections(
+        prs=[closed(0), closed(2)],  # closed today and 2 days ago
+    )
+    section = built[0]
+    closed_channel = {c.label: c for c in section.channels}["closed"]
+    assert closed_channel.total == 2
+    # Today (index -1) should have 1 count, 2 days ago (index -3) should have 1 count
+    assert closed_channel.counts[-1] == 1  # today
+    assert closed_channel.counts[-3] == 1  # 2 days ago
+
+
+def test_closed_pr_opened_before_window_but_closed_inside() -> None:
+    # Test PR opened before window but closed inside it
+    built = sections(
+        prs=[opened(15), closed(1)],  # opened 15 days ago, closed 1 day ago
+    )
+    section = built[0]
+    opened_channel = {c.label: c for c in section.channels}["opened"]
+    closed_channel = {c.label: c for c in section.channels}["closed"]
+    assert opened_channel.total == 1
+    assert closed_channel.total == 1
+
+
+def test_closed_channel_attribution() -> None:
+    # Test that closed PRs are attributed correctly to their owners
+    built = sections(
+        prs=[
+            closed(1, "acme/widget"),
+            closed(2, "SimAin/personal"),
+        ],
+    )
+    assert len(built) == 2  # Should have 2 owners
+    
+    # Find the sections for each owner
+    acme_section = next(s for s in built if s.owner == "acme")
+    personal_section = next(s for s in built if s.owner == "SimAin") 
+    
+    closed_acme = {c.label: c for c in acme_section.channels}["closed"]
+    closed_personal = {c.label: c for c in personal_section.channels}["closed"]
+    
+    assert closed_acme.total == 1
+    assert closed_personal.total == 1
 
 
 def test_malformed_items_are_ignored() -> None:

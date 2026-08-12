@@ -24,7 +24,7 @@ DEFAULT_DAYS = 14
 MIN_DAYS = 7
 MAX_DAYS = 30
 
-CHANNEL_ORDER = ("reviews", "commits", "opened")
+CHANNEL_ORDER = ("reviews", "commits", "opened", "closed")
 
 
 @dataclass(frozen=True)
@@ -184,6 +184,16 @@ def _opened_ref(item: dict[str, Any]) -> tuple[str, Any] | None:
     return (owner, item.get("created_at")) if owner else None
 
 
+def _closed_ref(item: dict[str, Any]) -> tuple[str, Any] | None:
+    """``(owner, timestamp)`` for one PR-search item (repository_url carries
+    ``…/repos/OWNER/REPO``)."""
+    url = item.get("repository_url")
+    if not isinstance(url, str) or "/repos/" not in url:
+        return None
+    owner = _owner_of(url.split("/repos/", 1)[1])
+    return (owner, item.get("closed_at")) if owner else None
+
+
 def _review_ref(event: dict[str, Any]) -> tuple[str, Any] | None:
     """``(owner, timestamp)`` for one feed event, reviews only."""
     if event.get("type") != "PullRequestReviewEvent":
@@ -235,6 +245,7 @@ def build_sections(
         add("commits", ref)
     for item in pr_items:
         add("opened", _opened_ref(item))
+        add("closed", _closed_ref(item))
     for event in events:
         add("reviews", _review_ref(event))
 
