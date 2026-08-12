@@ -422,8 +422,10 @@ inputs**: a PR opened *and* closed inside the window comes back from both
 searches, and merging the lists would double-count it in each row.
 
 **Consequence & accepted limits:** one more search per run, with its own
-1000-result truncation note. A merged/abandoned split is deferred (issue
-#91's "Later" menu).
+1000-result truncation note. The search matches `is:closed` *at query time*,
+so a PR closed in the window and later reopened drops out of the row between
+runs — back on the plate, no longer counted as left. A merged/abandoned
+split is deferred (issue #91's "Later" menu).
 
 ---
 

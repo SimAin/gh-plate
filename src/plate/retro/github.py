@@ -80,7 +80,8 @@ def _search_prs(login: str, qualifiers: str) -> tuple[list[dict[str, Any]], int]
         ):
             raise gh.PlateError("GitHub returned an unexpected search payload.")
         count = payload.get("total_count")
-        total = count if isinstance(count, int) else 0
+        if isinstance(count, int):  # a later page missing it keeps page 1's
+            total = count
         items.extend(item for item in payload["items"] if isinstance(item, dict))
         if len(payload["items"]) < SEARCH_PER_PAGE:
             break
