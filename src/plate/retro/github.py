@@ -64,15 +64,15 @@ def fetch_events(login: str) -> list[dict[str, Any]]:
     return events
 
 
-def fetch_opened(login: str, since_date: str) -> tuple[list[dict[str, Any]], int]:
-    """PRs opened by ``login`` since ``since_date`` (YYYY-MM-DD): ``(items,
-    server total)``. ``total`` can exceed what pagination retrieves (the
-    1000-result cap); callers compare to report truncation honestly."""
+def _search_prs(login: str, qualifiers: str) -> tuple[list[dict[str, Any]], int]:
+    """One paginated PR search for ``login``: ``(items, server total)``.
+    ``total`` can exceed what pagination retrieves (the 1000-result cap);
+    callers compare to report truncation honestly."""
     items: list[dict[str, Any]] = []
     total = 0
     for page in range(1, SEARCH_MAX_PAGES + 1):
         payload = _fetch_json(
-            f"search/issues?q=author:{login}+is:pr+created:>={since_date}"
+            f"search/issues?q=author:{login}+is:pr+{qualifiers}"
             f"&per_page={SEARCH_PER_PAGE}&page={page}"
         )
         if not isinstance(payload, dict) or not isinstance(
@@ -80,11 +80,23 @@ def fetch_opened(login: str, since_date: str) -> tuple[list[dict[str, Any]], int
         ):
             raise gh.PlateError("GitHub returned an unexpected search payload.")
         count = payload.get("total_count")
-        total = count if isinstance(count, int) else 0
+        if isinstance(count, int):  # a later page missing it keeps page 1's
+            total = count
         items.extend(item for item in payload["items"] if isinstance(item, dict))
         if len(payload["items"]) < SEARCH_PER_PAGE:
             break
     return items, total
+
+
+def fetch_opened(login: str, since_date: str) -> tuple[list[dict[str, Any]], int]:
+    """PRs opened by ``login`` since ``since_date`` (YYYY-MM-DD)."""
+    return _search_prs(login, f"created:>={since_date}")
+
+
+def fetch_closed(login: str, since_date: str) -> tuple[list[dict[str, Any]], int]:
+    """PRs by ``login`` closed since ``since_date`` (YYYY-MM-DD) — merged and
+    closed-without-merge alike; the channel means "left the plate"."""
+    return _search_prs(login, f"is:closed+closed:>={since_date}")
 
 
 def _fetch_compare(repo: str, base: str, head: str) -> dict[str, Any] | None:

@@ -39,7 +39,12 @@ def section(owner: str = "acme", reviews_last: int | None = 2) -> RetroSection:
     reviews = (
         quiet("reviews") if reviews_last is None else active("reviews", reviews_last)
     )
-    channels = [reviews, active("commits", 0), active("opened", 5)]
+    channels = [
+        reviews,
+        active("commits", 0),
+        active("opened", 5),
+        quiet("closed"),
+    ]
     return RetroSection(
         owner=owner,
         channels=channels,
@@ -56,7 +61,8 @@ def test_panel_structure_and_alignment() -> None:
     assert visible_length(ruler) == render.LABEL_WIDTH + DAYS * render.CELL + 4
     assert ruler.rstrip().endswith("Σ")
     assert " F " in ruler  # NOW is a Friday
-    for line, label in zip(lines[2:], ("reviews", "commits", "opened"), strict=True):
+    labels = ("reviews", "commits", "opened", "closed")
+    for line, label in zip(lines[2:], labels, strict=True):
         assert line.startswith(f"   {label}")
 
 
@@ -112,8 +118,9 @@ def test_reviews_nudge_gold_when_quiet_all_window() -> None:
 def test_no_nudge_when_reviewed_recently_or_on_other_channels() -> None:
     out = render.panel([section(reviews_last=1)], DAYS, NOW, use_color=True)
     assert SOFT_GOLD not in out
-    # opened has been quiet 5 days — dim, never gold.
+    # opened quiet 5 days, closed quiet all window — dim, never gold.
     assert f"{DIM}last 5d ago{RESET}" in out
+    assert f"{DIM}none in 14d{RESET}" in out
 
 
 def test_annotations_cover_the_edges() -> None:
@@ -147,6 +154,7 @@ def test_markdown_one_heading_and_table_per_owner() -> None:
     assert out.count("| Channel | Total | Last |") == 2
     assert "| reviews | 2 | last 2d ago |" in out
     assert "| commits | 2 | today |" in out
+    assert "| closed | 0 | none in 14d |" in out
     assert "\033[" not in out
 
 

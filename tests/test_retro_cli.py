@@ -1,5 +1,5 @@
 """Tests for plate.retro.cli and plate.retro.github — flags, dispatch, and
-the three activity fetches, with ``gh`` stubbed at the shared chokepoint."""
+the activity fetches, with ``gh`` stubbed at the shared chokepoint."""
 
 from __future__ import annotations
 
@@ -26,6 +26,13 @@ def pr_item(repo: str = "acme/widget") -> dict[str, Any]:
     return {
         "repository_url": f"https://api.github.com/repos/{repo}",
         "created_at": _iso(),
+    }
+
+
+def closed_item(repo: str = "acme/widget") -> dict[str, Any]:
+    return {
+        "repository_url": f"https://api.github.com/repos/{repo}",
+        "closed_at": _iso(),
     }
 
 
@@ -104,6 +111,17 @@ def test_fetch_opened_builds_the_search_and_reports_totals(monkeypatch) -> None:
     )
 
 
+def test_fetch_closed_builds_the_search_and_reports_totals(monkeypatch) -> None:
+    body = json.dumps({"total_count": 1, "items": [closed_item()]})
+    fake_run, paths = _paged_run([body])
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    items, total = github.fetch_closed("simon", "2026-06-06")
+    assert (len(items), total) == (1, 1)
+    assert paths[0].startswith(
+        "search/issues?q=author:simon+is:pr+is:closed+closed:>=2026-06-06"
+    )
+
+
 def test_search_pagination_stops_on_a_short_page(monkeypatch) -> None:
     full_page = {"total_count": 150, "items": [pr_item()] * 100}
     short_page = {"total_count": 150, "items": [pr_item()] * 50}
@@ -113,6 +131,15 @@ def test_search_pagination_stops_on_a_short_page(monkeypatch) -> None:
     assert len(items) == 150
     assert total == 150
     assert len(paths) == 2
+
+
+def test_search_total_survives_a_page_missing_total_count(monkeypatch) -> None:
+    full_page = json.dumps({"total_count": 150, "items": [pr_item()] * 100})
+    bare_page = json.dumps({"items": [pr_item()] * 50})
+    fake_run, _ = _paged_run([full_page, bare_page])
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    _, total = github.fetch_opened("simon", "2026-06-06")
+    assert total == 150
 
 
 def test_fetch_compares_align_with_their_ranges(monkeypatch) -> None:
@@ -207,11 +234,13 @@ def _stub(
     events: list[dict[str, Any]] | None = None,
     compares: list[dict[str, Any] | None] | None = None,
     prs: tuple[list[dict[str, Any]], int] = ([], 0),
+    closed_prs: tuple[list[dict[str, Any]], int] = ([], 0),
     login: str | None = "simon",
 ) -> dict[str, Any]:
     calls: dict[str, Any] = {}
     monkeypatch.setattr(gh, "current_login", lambda: login)
     monkeypatch.setattr(github, "fetch_events", lambda lg: events or [])
+    monkeypatch.setattr(github, "fetch_closed", lambda lg, since: closed_prs)
 
     def fake_compares(
         ranges: list[tuple[str, str, str]],
@@ -286,6 +315,12 @@ def test_run_warns_when_search_was_truncated(monkeypatch, capsys) -> None:
     _stub(monkeypatch, prs=([pr_item()], 1500))
     assert cli.main(["retro", "--color", "never"]) == 0
     assert "counting 1 of 1500 PRs opened" in capsys.readouterr().err
+
+
+def test_run_warns_when_closed_search_was_truncated(monkeypatch, capsys) -> None:
+    _stub(monkeypatch, closed_prs=([closed_item()], 1500))
+    assert cli.main(["retro", "--color", "never"]) == 0
+    assert "counting 1 of 1500 PRs closed" in capsys.readouterr().err
 
 
 def test_run_warns_when_the_feed_cannot_cover_the_window(
