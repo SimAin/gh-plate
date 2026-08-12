@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.5.0](https://github.com/SimAin/gh-plate/compare/v1.4.0...v1.5.0) (2026-08-12)
+
+
+### Features
+
+* **retro:** add closed channel to show PRs leaving the plate ([d6c299f](https://github.com/SimAin/gh-plate/commit/d6c299f401ee41c8f41ffc109d1d93737161b649))
+* **retro:** closed channel per owner — compare opened vs closed flow ([a9776e8](https://github.com/SimAin/gh-plate/commit/a9776e871a3edf429a85dd791ad1a37f117de1bf))
+
+
+### Bug Fixes
+
+* **retro:** isolate CLI tests from the live closed search ([8bc20c8](https://github.com/SimAin/gh-plate/commit/8bc20c897900e5338aaa507367b1663591b9ecfe))
+* **retro:** wire the closed channel end to end ([7aeef34](https://github.com/SimAin/gh-plate/commit/7aeef341f2c2fc56d4b614976cb874b75fdd559a))
+
+
+### Performance Improvements
+
+* **issues:** fetch viewer login in the main GraphQL query ([0fc7216](https://github.com/SimAin/gh-plate/commit/0fc7216069c0c5c28b1f12f0b5aa515214eef884))
+* **issues:** fetch viewer login in the main GraphQL query ([ca316e7](https://github.com/SimAin/gh-plate/commit/ca316e7fcd78920c120a3ff340c073404f1f0612)), closes [#18](https://github.com/SimAin/gh-plate/issues/18)
+
+
+### Documentation
+
+* **readme:** drop the 6h age example the renderer cannot produce ([89cee17](https://github.com/SimAin/gh-plate/commit/89cee177917d155a81e0c0f3847090734980fa75))
+* **readme:** drop the 6h age example the renderer cannot produce ([804d0c5](https://github.com/SimAin/gh-plate/commit/804d0c53baaf6e99e0e52a6d87a81dc1d7eeac1a))
+
 ## [1.4.0](https://github.com/SimAin/gh-plate/compare/v1.3.0...v1.4.0) (2026-08-10)
 
 
