@@ -1,6 +1,6 @@
 """The ``retro`` subcommand: a retrospective of your own GitHub activity.
 
-Thin wiring layer: parse the flags, fetch the three activity sources, hand
+Thin wiring layer: parse the flags, fetch the activity sources, hand
 them to the model to bucket by owner and the renderer to format. Needs no
 repo and no checkout — it runs from anywhere ``gh`` is authenticated.
 """
@@ -43,9 +43,10 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     retro = subparsers.add_parser(
         "retro",
         help="A day-by-day retrospective of your own GitHub activity — "
-        "reviews, commits, PRs opened — split by repository owner.",
+        "reviews, commits, PRs opened and closed — split by repository owner.",
         description="A day-by-day retrospective of your own GitHub activity "
-        "(reviews, commits, PRs opened), private repositories included, "
+        "(reviews, commits, PRs opened and closed), private repositories "
+        "included, "
         "split into one panel per repository owner so work and personal "
         "activity read separately. Needs no repository checkout.",
     )
@@ -86,8 +87,11 @@ def run(args: argparse.Namespace) -> int:
         [(group.repo, group.base, group.head) for group in groups]
     )
     commit_refs, unexpanded = commits_from_compares(groups, compares, login)
-    pr_items, pr_total = github.fetch_opened(login, since_date)
-    sections = build_sections(commit_refs, pr_items, events, args.days, now)
+    opened_items, opened_total = github.fetch_opened(login, since_date)
+    closed_items, closed_total = github.fetch_closed(login, since_date)
+    sections = build_sections(
+        commit_refs, opened_items, closed_items, events, args.days, now
+    )
 
     if not sections:
         print(f"No activity found in the last {args.days} days.")
@@ -102,7 +106,8 @@ def run(args: argparse.Namespace) -> int:
         print(render.panel(sections, args.days, now, use_color))
 
     notes = [
-        truncation_note("PRs opened", len(pr_items), pr_total),
+        truncation_note("PRs opened", len(opened_items), opened_total),
+        truncation_note("PRs closed", len(closed_items), closed_total),
         coverage_note(events, args.days, now, github.EVENTS_FEED_CAP),
         unexpanded_note(unexpanded),
     ]

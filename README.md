@@ -236,11 +236,13 @@ plate retro --days 21    # 7-30
    reviews     ·  ·  2  1  ·  3  1  ·  ·  2  1  1  ·  ·   11   last 2d ago
    commits     ·  ·  1  ·  2  ·  ·  ·  ·  ·  4  6  5  3   21   today
    opened      ·  ·  ·  1  ·  ·  ·  ·  ·  ·  ·  1  ·  ·    2   last 2d ago
+   closed      ·  ·  1  ·  ·  ·  1  ·  ·  ·  ·  ·  1  ·    3   last 1d ago
 ── SimAin · last 14 days ───────────────────────────────────────────
                S  S  M  T  W  T  F  S  S  M  T  W  T  F    Σ
    reviews     ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·    0   none in 14d
    commits     ·  ·  ·  ·  3  ·  ·  ·  ·  ·  ·  2  ·  1    6   today
    opened      ·  ·  ·  ·  1  ·  ·  ·  ·  ·  ·  ·  ·  ·    1   last 9d ago
+   closed      ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  1  ·  ·    1   last 2d ago
 ```
 
 Owners appear most active first. Columns are days (weekday ruler, weekends
@@ -249,10 +251,18 @@ total, and each row ends with the literal answer to "when did I last…?". The
 one tint is the gold nudge on a reviews row that has been quiet for two days
 or more.
 
+`closed` means "left the plate" — merged and closed-without-merge count
+alike. The `opened`/`closed` pair compares **flow rates**, it doesn't track
+individual PRs, so the rows don't reconcile within a window: a PR opened
+before the window can close inside it, and `closed` can exceed `opened`.
+That's the glance the pairing exists for: *"opened 6, closed 1 this window —
+something's stuck there."*
+
 Each channel reads the best source that can see private activity — reviews
-from your own events feed, PRs opened from search, and **commits from your
-push events expanded through the compare API**, so branch work counts with
-its real magnitude on the day it happened, not the day it merged. It needs
+from your own events feed, PRs opened and closed from search, and **commits
+from your push events expanded through the compare API**, so branch work
+counts with its real magnitude on the day it happened, not the day it
+merged. It needs
 no checkout and runs from anywhere `gh` is authenticated.
 
 Honesty notes when a source hits its limits: GitHub keeps only your 300 most

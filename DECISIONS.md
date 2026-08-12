@@ -402,6 +402,31 @@ branches. Day buckets are UTC.
 
 ---
 
+## D14 — Retro `closed` channel: all closed, `closedAt` buckets, flow not tracking (issue #91)
+
+**Decision:** A fourth retro channel, `closed`, follows `opened` in
+`CHANNEL_ORDER`: PRs the viewer authored that left the plate — **merged and
+closed-without-merge alike** — from one extra issue search
+(`is:pr is:closed closed:>=`), bucketed by the UTC day of each item's
+`closed_at`, attributed to owners via `repository_url` exactly like
+`opened`. The channel answers "left my plate", not "succeeded": hiding
+unmerged closes would make an abandoned PR look like one still waiting. The
+row stays dim under any quiet-length (no gold nudge — closing PRs isn't a
+social duty), and the markdown totals table picks it up for free.
+
+**Rows don't reconcile within a window — by design.** A PR opened 20 days
+ago can close today, so `closed` can exceed `opened`; the channels compare
+flow rates, not track individual PRs (noted in the README so it doesn't come
+back as a bug report). The model takes opened and closed items as **separate
+inputs**: a PR opened *and* closed inside the window comes back from both
+searches, and merging the lists would double-count it in each row.
+
+**Consequence & accepted limits:** one more search per run, with its own
+1000-result truncation note. A merged/abandoned split is deferred (issue
+#91's "Later" menu).
+
+---
+
 ## Standing decisions carried from the architecture discussion
 
 - **Standalone, not a shared package.** The GraphQL fetch layer is specific enough

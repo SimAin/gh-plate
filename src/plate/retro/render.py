@@ -39,8 +39,8 @@ def _annotation(channel: RetroChannel, days: int) -> str:
 
 
 def _annotation_color(channel: RetroChannel) -> str:
-    # The motivating glance: reviews gone quiet get the nudge; a quiet
-    # commits or opened row is nobody's duty.
+    # The motivating glance: reviews gone quiet get the nudge; the other
+    # channels are nobody's duty and stay dim.
     quiet = channel.last_days is None or channel.last_days >= NUDGE_QUIET_DAYS
     if channel.label == "reviews" and quiet:
         return SOFT_GOLD
