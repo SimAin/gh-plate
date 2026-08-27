@@ -1,12 +1,14 @@
 """Domain model: raw ``gh`` GraphQL PR nodes -> a list of :class:`PrRow`s.
 
 Pure functions only — no subprocess, no I/O, no printing, and no rendering
-(that is the render layer's job). This is the PR-view counterpart to
-:mod:`plate.issues.model`: it takes the GraphQL PR payload shape produced by
-the fetch layer and normalizes each node into an immutable :class:`PrRow`,
-resolving the derived signals the views care about — bot authorship, the
-review/CI state mapping, conflict/staleness flags, the single headline
-:func:`pr_state`, and the yours / to-review / the-rest grouping.
+(that is the render layer's job; width-aware truncation is borrowed from
+:mod:`plate.core.render` — it is text maths, not output). This is the
+PR-view counterpart to :mod:`plate.issues.model`: it takes the GraphQL PR
+payload shape produced by the fetch layer and normalizes each node into an
+immutable :class:`PrRow`, resolving the derived signals the views care
+about — bot authorship, the review/CI state mapping, conflict/staleness
+flags, the single headline :func:`pr_state`, and the yours / to-review /
+the-rest grouping.
 
 Ported from the standalone ``gh-pr-status`` tool during the absorption epic
 (#50); the boundary test enforces that this module imports only stdlib and

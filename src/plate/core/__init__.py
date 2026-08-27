@@ -1,6 +1,7 @@
 """Shared plumbing for every plate domain package: I/O primitives (``gh``),
 presentation primitives (``render``), text/timestamp cleaning (``text``),
-and the JSON config (``config``).
+the JSON config (``config``), and owner-alias resolution plus listing
+truncation notes (``owner``).
 
 Domain packages (``plate.issues``, and later a ``plate.prs``) may import from
 here; ``plate.core`` never imports a domain package back (see

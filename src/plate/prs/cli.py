@@ -224,7 +224,9 @@ def _run_owner(args: argparse.Namespace) -> int:
         print()
         print(render.owner_table(sections, use_color, use_links=sys.stdout.isatty()))
 
-    note = owner.truncation_note("open PRs", display, len(prs), total, args.limit)
+    note = owner.listing_truncation_note(
+        "open PRs", display, len(prs), total, args.limit
+    )
     if note:
         print(note, file=sys.stderr)
     return 0

@@ -62,7 +62,7 @@ def resolve_owner(requested: str, cfg: config.Config) -> ResolvedOwner:
     )
 
 
-def truncation_note(
+def listing_truncation_note(
     noun: str, display: str, shown: int, total: int, limit: int
 ) -> str | None:
     """The note for a clipped owner-wide listing, or None when it was complete.

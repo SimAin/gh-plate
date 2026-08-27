@@ -241,7 +241,9 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
             )
         )
 
-    note = owner.truncation_note("open issues", display, len(issues), total, args.limit)
+    note = owner.listing_truncation_note(
+        "open issues", display, len(issues), total, args.limit
+    )
     if note:
         print(note, file=sys.stderr)
     return 0
