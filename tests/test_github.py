@@ -40,12 +40,27 @@ def test_repo_from_remote_parses_github_urls(remote: str) -> None:
     assert gh.repo_from_remote(remote) == "an-org/a-repo"
 
 
-def test_run_missing_binary_raises_issue_check_error() -> None:
+def _missing_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Simulate a binary that isn't on PATH, without attempting a real exec."""
+
+    def raise_missing(*args: Any, **kwargs: Any) -> None:
+        raise FileNotFoundError("no-such-binary-xyz")
+
+    monkeypatch.setattr(gh.subprocess, "run", raise_missing)
+
+
+def test_run_missing_binary_raises_issue_check_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _missing_binary(monkeypatch)
     with pytest.raises(gh.PlateError, match="no-such-binary-xyz"):
         gh.run_command(["no-such-binary-xyz", "--version"])
 
 
-def test_run_missing_binary_generic_install_hint() -> None:
+def test_run_missing_binary_generic_install_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _missing_binary(monkeypatch)
     with pytest.raises(gh.PlateError) as excinfo:
         gh.run_command(["no-such-binary-xyz", "--version"])
     assert "Install no-such-binary-xyz and ensure it is on PATH" in str(excinfo.value)
@@ -1133,3 +1148,10 @@ def test_fetch_project_fields_returns_dict_nodes_only(
 def test_format_names_cleans_board_text() -> None:
     assert github._format_names(["Todo\x1b[2J\x1b[H", "Done"]) == '"Todo", "Done"'
     assert github._format_names([]) == "none"
+
+
+def test_conftest_guard_refuses_a_real_subprocess() -> None:
+    # Proves the autouse net in conftest.py is in place: an unstubbed boundary
+    # call fails here rather than reaching a real gh.
+    with pytest.raises(AssertionError, match="must not shell out"):
+        gh.run_command(["gh", "--version"])
