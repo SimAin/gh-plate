@@ -180,7 +180,11 @@ def _run_yours(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
         if args.show_key:
             print(render.symbol_key(use_color))
             print()
-        print(render.terminal_tree(forest, use_color, cfg.style_for))
+        print(
+            render.terminal_tree(
+                forest, use_color, cfg.style_for, use_links=sys.stdout.isatty()
+            )
+        )
 
     if len(issues) == args.limit and total > args.limit:
         print(
@@ -244,7 +248,11 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
             print()
         if alias_fired:
             print(render.dim(display, use_color))
-        print(render.owner_tree(sections, use_color, cfg.style_for))
+        print(
+            render.owner_tree(
+                sections, use_color, cfg.style_for, use_links=sys.stdout.isatty()
+            )
+        )
 
     if len(issues) < total:
         if len(issues) == args.limit:
@@ -313,5 +321,9 @@ def _run_sprint(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
         if args.show_key:
             print(render.sprint_key(use_color))
             print()
-        print(render.sprint_table(view, use_color, cfg.style_for))
+        print(
+            render.sprint_table(
+                view, use_color, cfg.style_for, use_links=sys.stdout.isatty()
+            )
+        )
     return 0

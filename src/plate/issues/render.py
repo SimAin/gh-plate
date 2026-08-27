@@ -209,7 +209,7 @@ def _pr_marker(pr_state: str | None, use_color: bool) -> str:
     return dim(glyph, use_color) if dimmed else glyph
 
 
-def _tree_cell(node: TreeNode, width: int, use_color: bool) -> str:
+def _tree_cell(node: TreeNode, width: int, use_color: bool, use_links: bool) -> str:
     """``<indent><glyph><pr> <#num> <title>`` sized to ``width`` before colour.
 
     Indentation conveys parenthood; the health glyph carries health for owned
@@ -228,11 +228,11 @@ def _tree_cell(node: TreeNode, width: int, use_color: bool) -> str:
 
     if row.context:
         # context ancestor: blank health+PR columns keep it aligned with owned rows
-        linked = hyperlink(num, row.url, use_color)
+        linked = hyperlink(num, row.url, use_links)
         return dim(f"{indent}{glyph}   {linked} {title}", use_color)
 
     color = STATE_GLYPHS[issue_state(row)][1]
-    linked = hyperlink(dim(num, use_color), row.url, use_color)
+    linked = hyperlink(dim(num, use_color), row.url, use_links)
     return f"{indent}{colorize(glyph, color, use_color)} {pr} {linked} {title}"
 
 
@@ -240,6 +240,7 @@ def terminal_tree(
     forest: list[TreeNode],
     use_color: bool,
     resolver: Callable[[str], str | None] | None = None,
+    use_links: bool = False,
 ) -> str:
     tree_w = _tree_width(terminal_width())
     columns = [
@@ -274,7 +275,7 @@ def terminal_tree(
         prog = dim(progress_text(row), use_color)  # parents show their rollup
 
         cells = [
-            (_tree_cell(node, tree_w, use_color), tree_w, "left"),
+            (_tree_cell(node, tree_w, use_color, use_links), tree_w, "left"),
             (age, AGE_W, "right"),
             (labels, LABELS_W, "left"),
             (prog, PROG_W, "right"),
@@ -363,7 +364,9 @@ def _sprint_issue_width(term: int) -> int:
     return max(MIN_TREE_WIDTH, min(term - fixed - separators, MAX_TREE_WIDTH))
 
 
-def _sprint_issue_cell(row: SprintRow, width: int, use_color: bool) -> str:
+def _sprint_issue_cell(
+    row: SprintRow, width: int, use_color: bool, use_links: bool
+) -> str:
     """``<glyph><pr> <#num> <title>`` for a sprint row, sized before colour.
 
     ``yours`` rows lead with a health glyph + PR marker (mirroring the tree
@@ -377,11 +380,11 @@ def _sprint_issue_cell(row: SprintRow, width: int, use_color: bool) -> str:
         pr = _pr_marker(row.pr_state, use_color)
         head = len(glyph) + 1 + 1 + 1 + len(num) + 1
         title = truncate(row.title, max(0, width - head))
-        linked = hyperlink(dim(num, use_color), row.url, use_color)
+        linked = hyperlink(dim(num, use_color), row.url, use_links)
         return f"{colorize(glyph, color, use_color)} {pr} {linked} {title}"
     head = len(CONTEXT_GLYPH) + 3 + len(num) + 1
     title = truncate(row.title, max(0, width - head))
-    linked = hyperlink(num, row.url, use_color)
+    linked = hyperlink(num, row.url, use_links)
     return f"{CONTEXT_GLYPH}   {linked} {title}"
 
 
@@ -407,13 +410,14 @@ def _sprint_row_line(
     columns: list[tuple[str, int, str]],
     use_color: bool,
     resolver: Callable[[str], str | None] | None,
+    use_links: bool = False,
 ) -> str:
     """One sprint row, laid out against ``columns`` (see :func:`_sprint_columns`).
 
     ``yours`` rows colour the Age (rose when stale) and promote special labels;
     ``others``/``unassigned`` carry the same data plain, then dim the whole line.
     """
-    issue = _sprint_issue_cell(row, columns[0][1], use_color)
+    issue = _sprint_issue_cell(row, columns[0][1], use_color, use_links)
     age_text = format_age(row.age_days)
     assignee = row.assignees[0] if row.assignees else "—"
     status = strip_emoji(row.status or "")
@@ -466,6 +470,7 @@ def sprint_table(
     view: SprintView,
     use_color: bool,
     resolver: Callable[[str], str | None] | None = None,
+    use_links: bool = False,
 ) -> str:
     columns = _sprint_columns(_sprint_issue_width(terminal_width()))
     total = sum(w for _, w, _ in columns) + 2 * (len(columns) - 1)
@@ -480,7 +485,7 @@ def sprint_table(
     ):
         lines.append(divider(f"{name} ({len(rows)})", total, use_color))
         for row in rows:
-            lines.append(_sprint_row_line(row, columns, use_color, resolver))
+            lines.append(_sprint_row_line(row, columns, use_color, resolver, use_links))
 
     return "\n".join(line.rstrip() for line in lines)
 
@@ -570,7 +575,9 @@ def _owner_columns(issue_w: int) -> list[tuple[str, int, str]]:
     ]
 
 
-def _owner_tree_cell(node: TreeNode, width: int, use_color: bool) -> str:
+def _owner_tree_cell(
+    node: TreeNode, width: int, use_color: bool, use_links: bool
+) -> str:
     """``<indent><glyph><pr> <#num> <title>`` for an owner row, sized before colour.
 
     Classified by :func:`model.row_class`: ``mine``/``unassigned`` lead with a
@@ -587,11 +594,11 @@ def _owner_tree_cell(node: TreeNode, width: int, use_color: bool) -> str:
         pr = _pr_marker(row.pr_state, use_color)
         head = len(indent) + len(glyph) + 1 + 1 + 1 + len(num) + 1
         title = truncate(row.title, max(0, width - head))
-        linked = hyperlink(dim(num, use_color), row.url, use_color)
+        linked = hyperlink(dim(num, use_color), row.url, use_links)
         return f"{indent}{colorize(glyph, color, use_color)} {pr} {linked} {title}"
     head = len(indent) + len(CONTEXT_GLYPH) + 3 + len(num) + 1
     title = truncate(row.title, max(0, width - head))
-    linked = hyperlink(num, row.url, use_color)
+    linked = hyperlink(num, row.url, use_links)
     return f"{indent}{CONTEXT_GLYPH}   {linked} {title}"
 
 
@@ -600,6 +607,7 @@ def _owner_row_line(
     columns: list[tuple[str, int, str]],
     use_color: bool,
     resolver: Callable[[str], str | None] | None,
+    use_links: bool = False,
 ) -> str:
     """One owner row, laid out against ``columns`` (see :func:`_owner_columns`).
 
@@ -610,7 +618,7 @@ def _owner_row_line(
     """
     row = node.row
     cls = row_class(row)
-    issue = _owner_tree_cell(node, columns[0][1], use_color)
+    issue = _owner_tree_cell(node, columns[0][1], use_color, use_links)
     age_text = format_age(row.age_days)
     prog = progress_text(row)
 
@@ -672,6 +680,7 @@ def owner_tree(
     sections: list[tuple[str, list[TreeNode]]],
     use_color: bool,
     resolver: Callable[[str], str | None] | None = None,
+    use_links: bool = False,
 ) -> str:
     """Terminal owner view: one header, then a divider + rows per repo section.
 
@@ -689,7 +698,7 @@ def owner_tree(
         open_count = sum(1 for n in nodes if not n.row.context)
         lines.append(divider(f"{repo} · {open_count} open", total, use_color))
         for node in nodes:
-            lines.append(_owner_row_line(node, columns, use_color, resolver))
+            lines.append(_owner_row_line(node, columns, use_color, resolver, use_links))
 
     return "\n".join(line.rstrip() for line in lines)
 

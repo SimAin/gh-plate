@@ -266,17 +266,27 @@ def test_terminal_tree_color_emits_ansi() -> None:
     assert "\033[" in out
 
 
-def test_terminal_tree_links_numbers_when_color_on() -> None:
-    out = render.terminal_tree(sample_forest(), use_color=True)
+def test_terminal_tree_links_numbers_when_links_on() -> None:
+    out = render.terminal_tree(sample_forest(), use_color=False, use_links=True)
     assert "\033]8;;" in out  # OSC-8 present
     assert "https://github.com/an-org/a-repo/issues/3" in out  # owned row link
     assert "https://github.com/an-org/a-repo/issues/10" in out  # context epic link
 
 
-def test_terminal_tree_no_links_when_color_off() -> None:
-    out = render.terminal_tree(sample_forest(), use_color=False)
+def test_terminal_tree_links_are_independent_of_color() -> None:
+    out = render.terminal_tree(sample_forest(), use_color=True)
+    assert "\033[" in out
     assert "\033]8;;" not in out
     assert "https://" not in out
+
+
+def test_sprint_and_owner_views_link_only_when_links_on() -> None:
+    sprint_on = render.sprint_table(_view(), use_color=False, use_links=True)
+    sprint_off = render.sprint_table(_view(), use_color=True)
+    owner_on = render.owner_tree(owner_sections(), use_color=False, use_links=True)
+    owner_off = render.owner_tree(owner_sections(), use_color=True)
+    assert "\033]8;;" in sprint_on and "\033]8;;" in owner_on
+    assert "\033]8;;" not in sprint_off and "\033]8;;" not in owner_off
 
 
 def test_pr_marker_beside_health_glyph() -> None:
