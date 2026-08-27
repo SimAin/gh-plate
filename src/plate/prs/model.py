@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from plate.core.render import truncate
 from plate.core.text import compact_text, parse_timestamp
 
 DEFAULT_STALE_DAYS = 14
@@ -125,15 +126,12 @@ def connection_nodes(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)]
 
 
-def truncate(value: str, max_length: int) -> str:
-    if len(value) <= max_length:
-        return value
-    if max_length <= 3:
-        return value[:max_length]
-    return f"{value[: max_length - 3]}..."
-
-
 def clean_title(title: Any, max_length: int = 50) -> str:
+    """A one-line title cut to ``max_length`` display columns.
+
+    Columns, not characters: a CJK or emoji title measures two per glyph, so
+    the row it lands in stays inside its budget.
+    """
     if not isinstance(title, str):
         return ""
     return truncate(compact_text(title), max_length)

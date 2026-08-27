@@ -701,3 +701,12 @@ def test_clean_title_neutralises_control_characters() -> None:
     out = model.clean_title(hostile)
     assert "\x1b" not in out and "\x07" not in out
     assert out.startswith("Add") and "feature" in out
+
+
+def test_clean_title_cuts_by_display_width() -> None:
+    from plate.core.render import visible_length
+
+    title = "支" * 40  # 40 glyphs, 80 display columns
+    out = model.clean_title(title, max_length=20)
+    assert out == "支" * 9 + "…"  # 18 columns of title + the ellipsis
+    assert visible_length(out) <= 20
