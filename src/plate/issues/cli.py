@@ -19,7 +19,7 @@ import argparse
 import sys
 from datetime import UTC, datetime
 
-from plate.core import config, gh
+from plate.core import config, gh, owner
 from plate.core.gh import PlateError
 from plate.core.render import color_enabled
 
@@ -195,27 +195,14 @@ def _run_yours(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
 
 
 def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
-    resolved = cfg.resolve_owner(args.owner)
-    # Show the alias mapping only when one actually fired (the resolver folds
-    # case, so compare after resolution); a literal owner shows just its name.
-    alias_fired = resolved != args.owner
-    display = f"{args.owner} → {resolved}" if alias_fired else args.owner
-
-    try:
-        owner_type = gh.resolve_owner_type(resolved)
-    except PlateError as exc:
-        # An unknown alias falls through resolve_owner as a literal, so a typo'd
-        # alias surfaces here as an unknown owner. If aliases are configured,
-        # list them so the user can spot the one they meant.
-        if cfg.owners:
-            aliases = ", ".join(
-                f"{alias} → {owner}" for alias, owner in cfg.owners.items()
-            )
-            raise PlateError(f"{exc}\nConfigured aliases: {aliases}") from exc
-        raise
+    target = owner.resolve_owner(args.owner, cfg)
+    display = target.display
 
     issues, total, viewer = github.fetch_owner_issues(
-        resolved, owner_type, args.limit, assignee="@me" if args.mine else None
+        target.name,
+        target.owner_type,
+        args.limit,
+        assignee="@me" if args.mine else None,
     )
     if not issues:
         if args.mine:
@@ -224,20 +211,20 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
             print(f"No open issues found for {display}.")
         return 0
 
-    # repo=resolved is only the fallback for a payload missing
+    # repo=target.name is only the fallback for a payload missing
     # repository.nameWithOwner; the owner query always carries it, so this is
     # inert here — it just keeps build_index's contract satisfied.
     index = build_index(
         issues,
         now=datetime.now(UTC),
         stale_days=args.stale_days,
-        repo=resolved,
+        repo=target.name,
         login=_require_login(viewer),
     )
     sections = group_by_repo(index)
 
     if args.format == "markdown":
-        if alias_fired:
+        if target.alias_fired:
             print(f"*{display}*")
             print()
         print(render.owner_markdown(sections, cfg.style_for))
@@ -246,7 +233,7 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
         if args.show_key:
             print(render.owner_key(use_color))
             print()
-        if alias_fired:
+        if target.alias_fired:
             print(render.dim(display, use_color))
         print(
             render.owner_tree(
@@ -254,20 +241,9 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
             )
         )
 
-    if len(issues) < total:
-        if len(issues) == args.limit:
-            print(
-                f"\nNote: showing {len(issues)} of {total} open issues for "
-                f"{display} (--limit {args.limit}).",
-                file=sys.stderr,
-            )
-        else:
-            print(
-                "\nNote: GitHub search returns at most 1000 results per query; "
-                f"showing {len(issues)} of {total} open issues for {display}. "
-                "Use --mine or --repo to narrow.",
-                file=sys.stderr,
-            )
+    note = owner.truncation_note("open issues", display, len(issues), total, args.limit)
+    if note:
+        print(note, file=sys.stderr)
     return 0
 
 
