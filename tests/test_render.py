@@ -666,3 +666,11 @@ def test_compact_text_neutralises_control_characters() -> None:
     assert compact_text(None) == "" and compact_text(42) == ""
     # Emoji, ZWJ sequences and East Asian text are not control characters.
     assert compact_text("🚀 打开 👩‍💻") == "🚀 打开 👩‍💻"
+
+
+def test_hyperlink_stays_plain_when_url_carries_control_bytes() -> None:
+    from plate.core.render import hyperlink
+
+    assert hyperlink("#1", "https://x/1\x1b\\\x1b[2J", enabled=True) == "#1"
+    assert hyperlink("#1", "https://x/1\x07", enabled=True) == "#1"
+    assert "\x1b]8;;https://x/1\x1b\\" in hyperlink("#1", "https://x/1", enabled=True)

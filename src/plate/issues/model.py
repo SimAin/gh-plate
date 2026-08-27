@@ -636,7 +636,9 @@ def status_rank(status: str | None, status_order: Sequence[str]) -> int:
 
 
 def _field_value(item: dict[str, Any], key: str, subkey: str) -> str | None:
-    """Read a non-empty string from ``item[key][subkey]`` (a project fieldValue)."""
+    """Read a non-empty string from ``item[key][subkey]`` (a project fieldValue).
+
+    Cleaned like a title; a value that is only control characters reads as absent."""
     value = item.get(key)
     if isinstance(value, dict):
         inner = compact_text(value.get(subkey))

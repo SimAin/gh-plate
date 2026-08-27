@@ -98,6 +98,8 @@ def hyperlink(text: str, url: str, enabled: bool) -> str:
     """
     if not enabled or not url:
         return text
+    if any(unicodedata.category(ch) == "Cc" for ch in url):
+        return text  # a control byte inside OSC-8 could close it early; stay plain
     return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
 
 
