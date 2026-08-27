@@ -36,6 +36,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from plate.core.render import compact_text
+
 # ``(repo, number)`` — the only identity that is unique across repos. An issue
 # *number* alone is only unique within its own repo, so every index/forest in
 # this module keys on this pair rather than on a bare number.
@@ -138,14 +140,7 @@ def age_in_days(updated_at: Any, now: datetime | None) -> int | None:
 
 
 def strip_emoji_shortcodes(name: str) -> str:
-    return _EMOJI_SHORTCODE_RE.sub("", name).strip()
-
-
-def compact_text(value: Any) -> str:
-    """Collapse a multi-line value to a single spaced line."""
-    if not isinstance(value, str):
-        return ""
-    return " ".join(value.split())
+    return compact_text(_EMOJI_SHORTCODE_RE.sub("", name))
 
 
 def _repo_of(issue: dict[str, Any], default_repo: str) -> str:
@@ -644,8 +639,8 @@ def _field_value(item: dict[str, Any], key: str, subkey: str) -> str | None:
     """Read a non-empty string from ``item[key][subkey]`` (a project fieldValue)."""
     value = item.get(key)
     if isinstance(value, dict):
-        inner = value.get(subkey)
-        if isinstance(inner, str) and inner:
+        inner = compact_text(value.get(subkey))
+        if inner:
             return inner
     return None
 
