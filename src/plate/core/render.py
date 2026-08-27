@@ -142,7 +142,8 @@ def terminal_width() -> int:
 def color_enabled(mode: str) -> bool:
     """Resolve a --color mode. An explicit always/never wins; under auto,
     NO_COLOR (non-empty) disables, then FORCE_COLOR decides (``0``/``false``
-    off, anything else on), otherwise colour iff stdout is a tty."""
+    off, anything else on), then ``TERM=dumb`` disables, otherwise colour iff
+    stdout is a tty."""
     if mode == "always":
         return True
     if mode == "never":
@@ -152,6 +153,10 @@ def color_enabled(mode: str) -> bool:
     force = os.environ.get("FORCE_COLOR")
     if force is not None:
         return force.lower() not in ("0", "false")
+    # Only the literal "dumb" — an unset TERM is common in CI containers that
+    # render ANSI perfectly well, so absence is not a signal.
+    if os.environ.get("TERM") == "dumb":
+        return False
     return sys.stdout.isatty()
 
 

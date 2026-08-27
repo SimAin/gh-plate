@@ -71,13 +71,17 @@ plate issues --stale-days 30
 plate issues --show-key
 plate issues --sprint            # the repo's current sprint (see below)
 plate issues --owner my-org      # every open issue across an owner (see below)
+plate issues --config-path       # where the config file is read from
+plate issues --config PATH       # read that config file instead
 ```
 
 If run outside a git repository without `--repo`, it prints an actionable error.
 
 `--color auto` (the default) honours [`NO_COLOR`](https://no-color.org) and
-`FORCE_COLOR` (`0`/`false` disables; `NO_COLOR` wins if both are set);
-`--color always`/`never` override both.
+`FORCE_COLOR` (`0`/`false` disables; `NO_COLOR` wins if both are set), and
+skips colour under `TERM=dumb` (the literal value only — an unset `TERM` is
+not dumb). `FORCE_COLOR` beats `TERM=dumb`; `--color always`/`never` override
+all of them.
 
 ### How to read the table
 
@@ -117,6 +121,8 @@ In `--format markdown` the marker carries the PR number and state word
 The other columns carry the detail (for your own issues; blank on context rows):
 
 - **Age** — time since last update (`3d`, `4w`, `5mo`, `2y`), rose once stale.
+  It counts whole elapsed days, not calendar days, so an update made late
+  yesterday can still read `0d`.
 - **Labels** — the raw label set, dimmed, `:emoji:` shortcodes stripped. Whole
   labels are packed into the column with a `+N` count for any that don't fit
   (e.g. `security +1`), so it stays a clean context indicator. `--format
@@ -146,6 +152,8 @@ plate prs --stale-days 7
 plate prs --show-key
 plate prs --timeline          # per-PR activity strip (see below)
 plate prs --owner my-org      # every open PR across an owner (see below)
+plate prs --config-path       # where the config file is read from
+plate prs --config PATH       # read that config file instead
 ```
 
 If run outside a git repository without `--repo`, it prints an actionable error.
@@ -174,7 +182,8 @@ reserved for what those columns don't cover.
 The remaining columns carry the detail:
 
 - **Age** — time since the PR was opened (e.g. `3d`, `4w`) — total time in
-  flight. Context only, always dimmed.
+  flight. Context only, always dimmed. Age and **Last** count whole elapsed
+  days, not calendar days, so a move made late yesterday can still read `0d`.
 - **Last** — time since the last *human* move (a commit, review, or comment;
   bot activity never counts). Its weight answers "whose move is next?": full
   weight means the other side moved last and the days are **your** lag (on
@@ -194,7 +203,9 @@ Settled PRs in "the rest" are dimmed so your attention lands on what's live.
 ### The activity strip (`plate prs --timeline`)
 
 `--timeline` adds a sub-line under each row: the last 28 days of human
-activity, one cell per day, rightmost = today.
+activity, one cell per day, rightmost = today. Cells are UTC calendar days, so
+near midnight an event can land one cell from where your local calendar puts
+it.
 
 ```
 •  #81   feat: lag-days columns …   me    1w    2d  changes req  ✓    5
@@ -280,7 +291,8 @@ Owners appear most active first. Columns are days (weekday ruler, weekends
 dimmed, today bold, rightmost = today), digits are counts, `Σ` is the window
 total, and each row ends with the literal answer to "when did I last…?". The
 one tint is the gold nudge on a reviews row that has been quiet for two days
-or more.
+or more. Days are UTC calendar days, so near midnight a count can land on a
+different day from your local calendar.
 
 `closed` means "left the plate" — merged and closed-without-merge count
 alike. The `opened`/`closed` pair compares **flow rates**, it doesn't track
@@ -439,6 +451,11 @@ A recognised label is pulled to the front of the Labels cell and shown bright:
 `alert` = red, `warn` = gold, `info` = green; `hide` drops the label entirely.
 Matching is case-insensitive and supports `*` globs for prefixed schemes. Your
 file merges over the built-in default, so you only list what you want to change.
+
+`plate issues` reads this file on every view; `plate prs` reads it only to
+resolve `--owner` aliases. Both take `--config PATH` to point at another file
+and `--config-path` to print the location they resolved; `plate retro` has no
+config-driven behaviour and reads no config.
 
 ## Development
 

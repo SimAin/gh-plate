@@ -3,10 +3,10 @@ repository.
 
 Thin wiring layer: parse the ``prs`` flags, ask :mod:`plate.prs.github` for
 data, hand it to :mod:`plate.prs.model` to normalize and :mod:`plate.prs.render`
-to format. Shared I/O (repo resolution) comes from :mod:`plate.core.gh`; all
-environment failures arrive as :class:`~plate.core.gh.PlateError` and
-:func:`plate.cli.main` turns them into a clean stderr message with a non-zero
-exit.
+to format. Shared I/O (repo resolution) comes from :mod:`plate.core.gh`; the
+JSON config from :mod:`plate.core.config`. All environment failures arrive as
+:class:`~plate.core.gh.PlateError` and :func:`plate.cli.main` turns them into a
+clean stderr message with a non-zero exit.
 
 Exposes :func:`add_parser` (registers the ``prs`` subparser) and :func:`run`
 (the subcommand's entry point) for :mod:`plate.cli` to wire up.
@@ -74,7 +74,8 @@ def _add_prs_flags(parser: argparse.ArgumentParser) -> None:
         choices=("auto", "always", "never"),
         default="auto",
         help="Colour terminal output. Defaults to auto, which honours NO_COLOR "
-        "and FORCE_COLOR and otherwise colours only a terminal.",
+        "and FORCE_COLOR, skips colour under TERM=dumb, and otherwise colours "
+        "only a terminal.",
     )
     parser.add_argument(
         "--stale-days",
@@ -97,6 +98,16 @@ def _add_prs_flags(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Print a key explaining the symbols above the table.",
     )
+    parser.add_argument(
+        "--config",
+        help="Path to a JSON config file. Defaults to $PLATE_CONFIG or "
+        "~/.config/plate/config.json.",
+    )
+    parser.add_argument(
+        "--config-path",
+        action="store_true",
+        help="Print the resolved config file location and exit.",
+    )
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -112,6 +123,10 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
 
 def run(args: argparse.Namespace) -> int:
+    if args.config_path:
+        print(args.config or config.config_path())
+        return 0
+
     if args.mine and not args.owner:
         raise PlateError(
             "--mine only applies with --owner. The repo view already shows every "
@@ -182,7 +197,7 @@ def _run_repo(args: argparse.Namespace, repo: str) -> int:
 
 
 def _run_owner(args: argparse.Namespace) -> int:
-    cfg = config.load_config()
+    cfg = config.load_config(args.config)
 
     login = gh.current_login()
     if login is None:

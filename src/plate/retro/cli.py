@@ -69,7 +69,8 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         choices=("auto", "always", "never"),
         default="auto",
         help="Colour terminal output. Defaults to auto, which honours NO_COLOR "
-        "and FORCE_COLOR and otherwise colours only a terminal.",
+        "and FORCE_COLOR, skips colour under TERM=dumb, and otherwise colours "
+        "only a terminal.",
     )
 
 
