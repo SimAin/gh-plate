@@ -93,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg = (
             config.load_config(args.config)
             if hasattr(args, "config")
-            else config.Config()
+            else config.default_config()
         )
         return _COMMANDS[args.command](args, cfg)
     except PlateError as exc:

@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from plate import cli
-from plate.core import gh
+from plate.core import config, gh
 from plate.core.gh import PlateError
 from plate.retro import github
 from plate.retro import model as retro_model
@@ -443,6 +443,16 @@ def test_run_renders_one_panel_per_owner(monkeypatch, capsys) -> None:
     assert calls["login"] == "simon"
     assert len(calls["since"]) == 10  # YYYY-MM-DD
     assert calls["ranges"] == [("acme/widget", "a" * 8, "b" * 8)]
+
+
+def test_retro_does_not_read_config(monkeypatch, capsys) -> None:
+    _stub(monkeypatch)
+
+    def refuse(path: str | None = None) -> None:
+        raise AssertionError("retro must not read config")
+
+    monkeypatch.setattr(config, "load_config", refuse)
+    assert cli.main(["retro", "--color", "never"]) == 0
 
 
 def test_run_days_reaches_the_window(monkeypatch, capsys) -> None:

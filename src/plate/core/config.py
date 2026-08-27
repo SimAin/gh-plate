@@ -167,6 +167,11 @@ class Config:
         return self.owners.get(key, name)
 
 
+def default_config() -> Config:
+    """The ``Config`` a missing config file resolves to — defaults, no owners."""
+    return Config(label_styles=dict(DEFAULT_LABEL_STYLES), owners={})
+
+
 def config_path() -> str:
     """The config path that would be read, absent an explicit ``--config``.
 
@@ -265,7 +270,7 @@ def load_config(path: str | None = None) -> Config:
     """Load config from ``path`` (or the default location), or defaults if absent."""
     target = path or config_path()
     if not os.path.exists(target):
-        return Config(label_styles=dict(DEFAULT_LABEL_STYLES), owners={})
+        return default_config()
     try:
         with open(target, encoding="utf-8") as handle:
             data = json.load(handle)

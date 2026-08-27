@@ -12,12 +12,14 @@ this within its own scope.
 
 from __future__ import annotations
 
+import argparse
 import pathlib
+from collections.abc import Callable
 from typing import Any, NoReturn
 
 import pytest
 
-from plate.core import gh
+from plate.core import config, gh
 
 
 @pytest.fixture(autouse=True)
@@ -46,3 +48,18 @@ def isolated_config_env(
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.delenv("PLATE_CONFIG", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
+
+
+@pytest.fixture
+def run_with_config() -> Callable[
+    [Callable[[argparse.Namespace, config.Config], int], argparse.Namespace], int
+]:
+    """Dispatch as plate.cli.main does: load the config, then hand both over."""
+
+    def dispatch(
+        run: Callable[[argparse.Namespace, config.Config], int],
+        args: argparse.Namespace,
+    ) -> int:
+        return run(args, config.load_config(args.config))
+
+    return dispatch

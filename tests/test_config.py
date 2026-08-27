@@ -357,3 +357,8 @@ def test_resolve_owner_default_config_is_always_literal(tmp_path) -> None:
     cfg = config.load_config(str(missing))
     assert cfg.owners == {}
     assert cfg.resolve_owner("anything") == "anything"
+
+
+def test_default_config_matches_missing_file_load(tmp_path) -> None:
+    missing = tmp_path / "nope.json"
+    assert config.default_config() == config.load_config(str(missing))
