@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.6.1](https://github.com/SimAin/gh-plate/compare/v1.6.0...v1.6.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **render:** clean board field names in errors; keep OSC-8 plain on odd URLs ([e69ce91](https://github.com/SimAin/gh-plate/commit/e69ce91463a25b2e3f47dcd47de7598eb55c5bf1))
+* **render:** strip terminal escapes from untrusted text before rendering ([294ae47](https://github.com/SimAin/gh-plate/commit/294ae479480b58176b7ca7d4138fe53e8c9c482f))
+* **render:** strip terminal escapes from untrusted text before rendering ([670a1c2](https://github.com/SimAin/gh-plate/commit/670a1c26e1cd90a9d20b53a5078d0e3d5d8c7e32))
+
+
+### Documentation
+
+* add CONTRIBUTING, SECURITY and CODE_OF_CONDUCT ([340615d](https://github.com/SimAin/gh-plate/commit/340615ddab9d39bd6bd574c2110caaa83ad61b1f))
+* address review — forward-looking comment rule, SECURITY scope, form nits ([43a31bc](https://github.com/SimAin/gh-plate/commit/43a31bcd80c4b518c766fcdc8034a2ea4d8a24db))
+* CONTRIBUTING, SECURITY, code of conduct, issue forms and PR template ([0a75a21](https://github.com/SimAin/gh-plate/commit/0a75a21b0d1365e66f3ef086d816cd2a94e4b689))
+
 ## [1.6.0](https://github.com/SimAin/gh-plate/compare/v1.5.0...v1.6.0) (2026-08-27)
 
 
