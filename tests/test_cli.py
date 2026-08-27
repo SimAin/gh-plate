@@ -650,6 +650,12 @@ class _Tty:
         ("auto", {"NO_COLOR": "1", "FORCE_COLOR": "1"}, True, False),
         ("always", {"NO_COLOR": "1"}, False, True),
         ("never", {"FORCE_COLOR": "1"}, True, False),
+        ("auto", {"TERM": "xterm-256color"}, True, True),
+        ("auto", {"TERM": "dumb"}, True, False),
+        ("auto", {"TERM": "dumb"}, False, False),
+        ("always", {"TERM": "dumb"}, True, True),
+        ("auto", {"TERM": "dumb", "FORCE_COLOR": "1"}, True, True),
+        ("auto", {"TERM": "dumb", "NO_COLOR": "1"}, True, False),
     ],
 )
 def test_color_enabled_resolution(monkeypatch, mode, env, tty, expected) -> None:
@@ -657,8 +663,11 @@ def test_color_enabled_resolution(monkeypatch, mode, env, tty, expected) -> None
 
     from plate.core import render
 
+    # Cleared, not merely unset in the case table: the developer's own TERM
+    # (and colour vars) must not reach the resolver.
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.delenv("TERM", raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(render, "sys", SimpleNamespace(stdout=_Tty(tty)))

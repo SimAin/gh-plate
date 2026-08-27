@@ -76,8 +76,11 @@ plate issues --owner my-org      # every open issue across an owner (see below)
 If run outside a git repository without `--repo`, it prints an actionable error.
 
 `--color auto` (the default) honours [`NO_COLOR`](https://no-color.org) and
-`FORCE_COLOR` (`0`/`false` disables; `NO_COLOR` wins if both are set);
-`--color always`/`never` override both.
+`FORCE_COLOR` (`0`/`false` disables; `NO_COLOR` wins if both are set), and
+skips colour under `TERM=dumb` — though an *unset* `TERM` is not treated as
+dumb, since plenty of CI containers leave it unset and render colour fine.
+`FORCE_COLOR` beats `TERM=dumb`, and `--color always`/`never` override all of
+them.
 
 ### How to read the table
 
