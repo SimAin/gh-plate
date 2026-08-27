@@ -1,0 +1,21 @@
+name: Feature request
+description: A new flag, column, view, or behaviour.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: glance
+    attributes:
+      label: The glance
+      description: What question would you be asking the terminal, and what would you want to see? A mock of the output is ideal.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What you do today
+      description: The workaround, or the tool you reach for instead.
+  - type: textarea
+    id: fit
+    attributes:
+      label: Fit
+      description: Which view does it belong to (`issues`, `prs`, `retro`, or new)? Does it keep to one health glyph per row and colour-for-health-only? See DECISIONS.md.
