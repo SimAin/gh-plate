@@ -515,3 +515,22 @@ def test_sprint_show_key_prints_sprint_key(monkeypatch, capsys) -> None:
     out = capsys.readouterr().out
     assert "Key" in out
     assert "someone else's / unassigned row" in out
+
+
+def test_tolerate_unencodable_replaces_instead_of_raising() -> None:
+    import io
+
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1252")
+    with pytest.raises(UnicodeEncodeError):
+        stream.write("⚠")
+    cli.tolerate_unencodable(stream)
+    stream.write("ok ⚠ ✓")
+    stream.flush()
+    assert raw.getvalue() == b"ok ? ?"
+
+
+def test_tolerate_unencodable_ignores_streams_without_reconfigure() -> None:
+    import io
+
+    cli.tolerate_unencodable(io.StringIO())  # no reconfigure(); must not raise

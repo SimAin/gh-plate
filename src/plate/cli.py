@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Callable
+from typing import TextIO
 
 from . import __version__
 from .core.gh import PlateError
@@ -53,7 +54,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return _build_parser().parse_args(argv)
 
 
+def tolerate_unencodable(stream: TextIO) -> None:
+    """Replace glyphs the stream's encoding can't carry (e.g. a cp1252 console)
+    instead of raising UnicodeEncodeError mid-table."""
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    tolerate_unencodable(sys.stdout)
+    tolerate_unencodable(sys.stderr)
     parser = _build_parser()
     args = parser.parse_args(argv)
     if args.command is None:
