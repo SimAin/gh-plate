@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from plate.core import gh
-from plate.core.render import compact_text
+from plate.core.text import compact_text
 
 from .model import normalize_status, strip_emoji
 

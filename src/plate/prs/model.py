@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from plate.core.render import compact_text
+from plate.core.text import compact_text, parse_timestamp
 
 DEFAULT_STALE_DAYS = 14
 TIMELINE_DAYS = 28
@@ -213,15 +213,6 @@ def bot_name(pr: dict[str, Any]) -> str | None:
     if name.endswith("[bot]"):
         name = name[: -len("[bot]")]
     return name
-
-
-def parse_timestamp(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def _days_since(value: Any, now: datetime | None) -> int | None:

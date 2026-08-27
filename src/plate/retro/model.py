@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
 
+from plate.core.text import parse_timestamp
+
 DEFAULT_DAYS = 14
 MIN_DAYS = 7
 MAX_DAYS = 30
@@ -65,15 +67,6 @@ def window_start(days: int, now: datetime) -> datetime:
     """The start of the window's oldest UTC day — today counts as day one."""
     oldest = now.astimezone(UTC).date() - timedelta(days=days - 1)
     return datetime.combine(oldest, time.min, tzinfo=UTC)
-
-
-def parse_timestamp(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def _owner_of(full_name: Any) -> str | None:

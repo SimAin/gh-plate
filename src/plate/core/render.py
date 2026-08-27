@@ -14,6 +14,10 @@ import shutil
 import sys
 import unicodedata
 
+# Re-exported: data cleaning lives in plate.core.text, but callers have long
+# imported compact_text from here.
+from plate.core.text import compact_text as compact_text
+
 # xterm-256 soft tints — muted hues so a coloured glyph reads as signal, not noise.
 SOFT_GREEN = "\033[38;5;151m"
 SOFT_ROSE = "\033[38;5;210m"
@@ -125,28 +129,6 @@ def format_age(age_days: int | None) -> str:
     if age_days < 365:
         return f"{age_days // 30}mo"
     return f"{age_days // 365}y"
-
-
-# Well-formed escape sequences: CSI (ESC [ … final), OSC (ESC ] … ST), and the
-# two-byte ESC+Fe forms. Removed whole so no `[31m`-style residue is left behind.
-_ESCAPE_SEQ_RE = re.compile(
-    r"(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]"  # CSI, 7- or 8-bit introducer
-    r"|\x1b\][^\x1b\x07]*(?:\x1b\\|\x07)"  # OSC … ST
-    r"|\x1b[@-Z\\-_]"  # two-byte ESC Fe
-)
-
-
-def compact_text(value: object) -> str:
-    """One clean line from untrusted text (titles, labels, board fields).
-
-    Escape sequences are removed and any remaining control characters (C0,
-    DEL, C1) become spaces, so a crafted title can't smuggle terminal escapes
-    or OSC-8 links into the output; whitespace then collapses."""
-    if not isinstance(value, str):
-        return ""
-    stripped = _ESCAPE_SEQ_RE.sub("", value)
-    plain = "".join(" " if unicodedata.category(ch) == "Cc" else ch for ch in stripped)
-    return " ".join(plain.split())
 
 
 def escape_markdown_cell(value: str) -> str:
