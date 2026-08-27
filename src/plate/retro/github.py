@@ -61,6 +61,7 @@ def _fetch_json(path: str) -> Any:
         raise gh.PlateError(
             "gh failed to fetch your activity "
             f"(is `gh` authenticated?):\n{result.stderr.strip()}"
+            + gh.rate_limit_hint(result.stderr, "use a shorter --days window")
         )
     try:
         return json.loads(result.stdout)

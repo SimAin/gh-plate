@@ -693,6 +693,39 @@ def test_search_paginated_non_transient_failure_does_not_retry(
         gh.search_paginated("QUERY", "q-str", 500, "acme")
 
 
+def test_search_paginated_rate_limit_failure_explains_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, 1, stdout="", stderr="gh: API rate limit exceeded for user ID 1."
+        )
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    with pytest.raises(gh.PlateError) as excinfo:
+        gh.search_paginated("QUERY", "q-str", 500, "acme")
+
+    message = str(excinfo.value)
+    assert "API rate limit exceeded" in message  # the raw stderr is kept
+    assert "GitHub is rate limiting this token" in message
+    assert "narrow the query (--repo, --mine, a smaller --limit)" in message
+
+
+def test_search_paginated_unrelated_failure_gets_no_rate_limit_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, 1, stdout="", stderr="gh: HTTP 422 Validation failed"
+        )
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    with pytest.raises(gh.PlateError) as excinfo:
+        gh.search_paginated("QUERY", "q-str", 500, "acme")
+
+    assert "rate limiting" not in str(excinfo.value)
+
+
 def test_search_paginated_invalid_json_raises_parse_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

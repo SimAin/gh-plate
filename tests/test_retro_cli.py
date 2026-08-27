@@ -182,6 +182,22 @@ def test_fetch_gh_failure_raises(monkeypatch) -> None:
         github.fetch_events("simon")
 
 
+def test_fetch_rate_limit_failure_explains_itself(monkeypatch) -> None:
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, 1, stdout="", stderr="gh: You have exceeded a secondary rate limit"
+        )
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    with pytest.raises(PlateError) as excinfo:
+        github.fetch_events("simon")
+
+    message = str(excinfo.value)
+    assert "secondary rate limit" in message  # the raw stderr is kept
+    assert "GitHub is rate limiting this token" in message
+    assert "--days" in message
+
+
 def test_fetch_malformed_json_raises(monkeypatch) -> None:
     def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args, 0, stdout="{not json", stderr="")

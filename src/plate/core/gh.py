@@ -128,6 +128,23 @@ _MIN_PAGE_SIZE = 25
 MAX_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 1.0
 
+# Rate limiting — the hourly budget, the secondary abuse limit (an HTTP 403),
+# or a bare HTTP 429 — is not transient: the wait is minutes, so retrying in
+# here would just hang. Name the cause instead; the raw stderr reads like a bug.
+_RATE_LIMITED = re.compile(r"rate limit|HTTP 429", re.IGNORECASE)
+_RATE_LIMIT_ADVICE = "narrow the query (--repo, --mine, a smaller --limit)"
+
+
+def rate_limit_hint(stderr: str, advice: str = _RATE_LIMIT_ADVICE) -> str:
+    """A leading-newline hint when ``stderr`` is GitHub rate limiting, else "".
+
+    ``advice`` is the caller's way out, since the flags that shrink a request
+    differ per view.
+    """
+    if not _RATE_LIMITED.search(stderr):
+        return ""
+    return f"\nGitHub is rate limiting this token. Wait a few minutes, or {advice}."
+
 
 # A self-overwriting stderr status line (``\r`` + erase-line), so a slow
 # multi-page fetch — especially one sleeping through 502 retries — doesn't
@@ -288,7 +305,8 @@ def search_paginated_with_viewer(
             result = attempt.result
             if result.returncode != 0:
                 raise PlateError(
-                    f"gh search failed for {error_context}:\n{result.stderr.strip()}"
+                    f"gh search failed for {error_context}:\n"
+                    f"{result.stderr.strip()}{rate_limit_hint(result.stderr)}"
                 )
             try:
                 payload = json.loads(result.stdout)
