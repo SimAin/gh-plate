@@ -80,6 +80,7 @@ def index(
 
 # --- normalization -----------------------------------------------------------
 
+
 def test_emoji_shortcodes_stripped_from_owned_labels() -> None:
     idx = index([make_issue(1, labels=[":cockroach: bug", ":scroll: epic"])])
     assert idx[k(1)].labels == ["bug", "epic"]
@@ -134,6 +135,7 @@ def test_issue_state_two_branches() -> None:
 
 # --- linked PRs ("fix in flight") --------------------------------------------
 
+
 def _pr(number: int, state: str, *, draft: bool = False) -> dict[str, Any]:
     return {"number": number, "state": state, "isDraft": draft}
 
@@ -175,18 +177,23 @@ def test_pr_state_flows_to_owned_row_but_not_context() -> None:
 
 # --- index: owned issues + context ancestors ---------------------------------
 
+
 def test_index_materializes_unowned_ancestor_as_context() -> None:
     epic = make_issue(
-        10, title="Epic", sub_total=3, sub_completed=1,
-        labels=["a", "b"], labels_total=9,
+        10,
+        title="Epic",
+        sub_total=3,
+        sub_completed=1,
+        labels=["a", "b"],
+        labels_total=9,
     )
     idx = index([make_issue(11, parent=epic)])
     assert set(idx) == {k(10), k(11)}
     assert idx[k(11)].mine is True
-    assert idx[k(10)].mine is False          # ancestor not assigned to me
-    assert idx[k(10)].labels == []           # context nodes carry no labels
-    assert idx[k(10)].labels_hidden == 0     # ...and never grow a +N tail
-    assert idx[k(10)].sub_total == 3         # but do carry their rollup
+    assert idx[k(10)].mine is False  # ancestor not assigned to me
+    assert idx[k(10)].labels == []  # context nodes carry no labels
+    assert idx[k(10)].labels_hidden == 0  # ...and never grow a +N tail
+    assert idx[k(10)].sub_total == 3  # but do carry their rollup
     assert idx[k(11)].parent_number == 10
 
 
@@ -213,9 +220,7 @@ def test_two_level_ancestor_chain_is_walked() -> None:
 
 
 def test_index_keeps_same_number_distinct_across_repos() -> None:
-    idx = index(
-        [make_issue(12, repo="repo-a"), make_issue(12, repo="repo-b")]
-    )
+    idx = index([make_issue(12, repo="repo-a"), make_issue(12, repo="repo-b")])
     assert set(idx) == {("repo-a", 12), ("repo-b", 12)}
     assert idx[("repo-a", 12)].repo == "repo-a"
     assert idx[("repo-b", 12)].repo == "repo-b"
@@ -342,6 +347,7 @@ def test_cross_repo_guard_stops_walk_even_if_grandparent_would_match() -> None:
 
 # --- forest: shape and ordering ----------------------------------------------
 
+
 def test_forest_roots_sorted_active_first() -> None:
     forest = model.build_forest(
         index([make_issue(3, updated_days_ago=5), make_issue(1, updated_days_ago=100)])
@@ -363,7 +369,7 @@ def test_group_floats_by_freshest_member_not_parent_age() -> None:
     )
     assert [n.row.number for n in forest] == [10, 3]
     flat = [n.row.number for n in model.flatten(forest)]
-    assert flat == [10, 11, 3]            # child nested under its parent
+    assert flat == [10, 11, 3]  # child nested under its parent
     assert forest[0].children[0].row.number == 11
     assert forest[0].depth == 0 and forest[0].children[0].depth == 1
 
@@ -503,7 +509,7 @@ def test_sprint_buckets_by_assignee() -> None:
             make_item(4, assignees=["other", "me"]),  # multi-assignee incl. me
         ]
     )
-    assert [r.number for r in view.yours] == [4, 1]   # both mine, by number desc
+    assert [r.number for r in view.yours] == [4, 1]  # both mine, by number desc
     assert [r.number for r in view.others] == [2]
     assert [r.number for r in view.unassigned] == [3]
 
@@ -565,7 +571,7 @@ def test_sprint_drops_other_repos_and_non_issues() -> None:
         [
             make_item(1, assignees=["me"]),
             make_item(2, assignees=["me"], repo="an-org/other"),  # wrong repo
-            make_item(3, typename="PullRequest"),                  # not an issue
+            make_item(3, typename="PullRequest"),  # not an issue
         ]
     )
     assert [r.number for r in view.yours] == [1]
@@ -575,7 +581,7 @@ def test_sprint_drops_other_repos_and_non_issues() -> None:
 def test_sprint_title_from_first_item_and_status_preserved() -> None:
     view = sprint([make_item(1, assignees=["me"], status="🚀 Shipping")])
     assert view.title == "Sprint 7"
-    assert view.yours[0].status == "🚀 Shipping"   # raw, emoji kept
+    assert view.yours[0].status == "🚀 Shipping"  # raw, emoji kept
 
 
 def test_sprint_title_survives_repo_filter() -> None:

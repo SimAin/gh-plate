@@ -52,6 +52,10 @@ plate issues --owner my-org      # every open issue across an owner (see below)
 
 If run outside a git repository without `--repo`, it prints an actionable error.
 
+`--color auto` (the default) honours [`NO_COLOR`](https://no-color.org) and
+`FORCE_COLOR` (`0`/`false` disables; `NO_COLOR` wins if both are set);
+`--color always`/`never` override both.
+
 ### How to read the table
 
 The open issues assigned to you, shown as a **tree**: each issue sits indented
@@ -62,7 +66,8 @@ unit (it floats by its most recently touched issue), while long-untouched
 clusters sink intact to the bottom.
 
 In a terminal that supports OSC-8 hyperlinks, each `#number` is clickable and
-opens the issue on GitHub (suppressed under `--color never` and when piped).
+opens the issue on GitHub. Links depend only on stdout being a terminal —
+not on `--color` or the colour environment variables.
 
 Colour is reserved for one thing: the health of an issue that's yours.
 

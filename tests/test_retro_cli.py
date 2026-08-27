@@ -250,9 +250,7 @@ def _stub(
 
     monkeypatch.setattr(github, "fetch_compares", fake_compares)
 
-    def fake_opened(
-        fetch_login: str, since: str
-    ) -> tuple[list[dict[str, Any]], int]:
+    def fake_opened(fetch_login: str, since: str) -> tuple[list[dict[str, Any]], int]:
         calls.update(login=fetch_login, since=since)
         return prs
 
@@ -323,9 +321,7 @@ def test_run_warns_when_closed_search_was_truncated(monkeypatch, capsys) -> None
     assert "counting 1 of 1500 PRs closed" in capsys.readouterr().err
 
 
-def test_run_warns_when_the_feed_cannot_cover_the_window(
-    monkeypatch, capsys
-) -> None:
+def test_run_warns_when_the_feed_cannot_cover_the_window(monkeypatch, capsys) -> None:
     _stub(monkeypatch, events=[review_event()] * github.EVENTS_FEED_CAP)
     assert cli.main(["retro", "--color", "never"]) == 0
     err = capsys.readouterr().err

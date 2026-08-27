@@ -12,8 +12,10 @@ place the domains may be named.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Callable
+from typing import TextIO
 
 from . import __version__
 from .core.gh import PlateError
@@ -53,7 +55,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return _build_parser().parse_args(argv)
 
 
+def tolerate_unencodable(stream: TextIO) -> None:
+    """Write UTF-8 regardless of locale (a cp1252 redirect would otherwise raise
+    UnicodeEncodeError on the glyphs); if that's refused, at least replace them."""
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    try:
+        reconfigure(encoding="utf-8", errors="replace")
+    except (LookupError, ValueError, OSError):
+        reconfigure(errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    tolerate_unencodable(sys.stdout)
+    tolerate_unencodable(sys.stderr)
     parser = _build_parser()
     args = parser.parse_args(argv)
     if args.command is None:
@@ -69,6 +85,26 @@ def main(argv: list[str] | None = None) -> int:
     except PlateError as exc:
         print(str(exc), file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        return 130
+    except BrokenPipeError:
+        # Reader (e.g. `| head`) went away. Point stdout at devnull so the
+        # interpreter's exit-time flush doesn't raise a second time.
+        _silence_stdout()
+        return 141
+
+
+def _silence_stdout() -> None:
+    try:
+        fd = sys.stdout.fileno()
+    except (OSError, ValueError):
+        return
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull, fd)
+    finally:
+        os.close(devnull)
 
 
 if __name__ == "__main__":

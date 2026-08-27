@@ -10,3 +10,8 @@ build/
 
 # Local Claude Code settings — machine-specific absolute paths
 .claude/settings.local.json
+
+# Coverage artefacts
+.coverage
+.coverage.*
+htmlcov/

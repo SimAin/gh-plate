@@ -466,9 +466,7 @@ def normalize_rows(
         # Store display-ready names: your own login reads as "me" wherever it
         # appears in the assignee list.
         assignees = ["me" if login == current_login else login for login in assignees]
-        channel_days, last_days, last_login, is_fallback = last_human_activity(
-            pr, now
-        )
+        channel_days, last_days, last_login, is_fallback = last_human_activity(pr, now)
         # Viewer-relative; unknown actor or unknown viewer claims nothing.
         last_mine: bool | None = None
         if not is_fallback and last_login is not None and current_login is not None:

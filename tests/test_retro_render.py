@@ -67,9 +67,7 @@ def test_panel_structure_and_alignment() -> None:
 
 
 def test_one_self_contained_panel_per_owner_in_order() -> None:
-    out = render.panel(
-        [section("acme"), section("SimAin")], DAYS, NOW, use_color=False
-    )
+    out = render.panel([section("acme"), section("SimAin")], DAYS, NOW, use_color=False)
     assert out.index("── acme") < out.index("── SimAin")
     assert out.count("reviews") == 2  # each section carries its own rows
     rulers = [line for line in out.splitlines() if line.rstrip().endswith("Σ")]

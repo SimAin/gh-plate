@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import io
+import os
+import sys
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -130,9 +133,7 @@ def _stub_owner(
 ) -> dict[str, Any]:
     """Wire the owner path's I/O to in-memory stubs; record fetch arguments."""
     calls: dict[str, Any] = {}
-    monkeypatch.setattr(
-        config, "load_config", lambda *a, **k: cfg or config.Config()
-    )
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: cfg or config.Config())
     monkeypatch.setattr(gh, "current_login", _boom_current_login)
     monkeypatch.setattr(gh, "current_repo", _boom_current_repo)
     monkeypatch.setattr(gh, "resolve_owner_type", lambda owner: owner_type)
@@ -224,9 +225,9 @@ def test_owner_empty_default_message(monkeypatch, capsys) -> None:
 
 def test_owner_empty_mine_message(monkeypatch, capsys) -> None:
     calls = _stub_owner(monkeypatch, issues=[], total=0)
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--owner", "an-org", "--mine"])
-    ) == 0
+    assert (
+        issues_cli.run(cli.parse_args(["issues", "--owner", "an-org", "--mine"])) == 0
+    )
     assert calls["assignee"] == "@me"
     assert "No open issues assigned to you for an-org." in capsys.readouterr().out
 
@@ -258,9 +259,10 @@ def test_owner_viewer_missing_with_empty_result_still_reports(
 def test_owner_truncation_note_limit_hit(monkeypatch, capsys) -> None:
     issues = [_issue(n) for n in range(1, 3)]
     _stub_owner(monkeypatch, issues=issues, total=5)
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--owner", "an-org", "--limit", "2"])
-    ) == 0
+    assert (
+        issues_cli.run(cli.parse_args(["issues", "--owner", "an-org", "--limit", "2"]))
+        == 0
+    )
     err = capsys.readouterr().err
     assert "showing 2 of 5 open issues for an-org (--limit 2)." in err
 
@@ -283,18 +285,24 @@ def test_owner_no_note_when_complete(monkeypatch, capsys) -> None:
 
 def test_owner_markdown_format(monkeypatch, capsys) -> None:
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--owner", "an-org", "--format", "markdown"])
-    ) == 0
+    assert (
+        issues_cli.run(
+            cli.parse_args(["issues", "--owner", "an-org", "--format", "markdown"])
+        )
+        == 0
+    )
     assert "## an-org/repo-a" in capsys.readouterr().out
 
 
 def test_owner_markdown_alias_shows_display_line(monkeypatch, capsys) -> None:
     cfg = config.Config(owners={"work": "company-org"})
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1, cfg=cfg)
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--owner", "work", "--format", "markdown"])
-    ) == 0
+    assert (
+        issues_cli.run(
+            cli.parse_args(["issues", "--owner", "work", "--format", "markdown"])
+        )
+        == 0
+    )
     out = capsys.readouterr().out
     assert "*work → company-org*" in out
     assert "## an-org/repo-a" in out
@@ -302,9 +310,10 @@ def test_owner_markdown_alias_shows_display_line(monkeypatch, capsys) -> None:
 
 def test_owner_show_key_prints_owner_key(monkeypatch, capsys) -> None:
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--owner", "an-org", "--show-key"])
-    ) == 0
+    assert (
+        issues_cli.run(cli.parse_args(["issues", "--owner", "an-org", "--show-key"]))
+        == 0
+    )
     out = capsys.readouterr().out
     assert "Key" in out
     assert "most recently active repo" in out
@@ -361,9 +370,7 @@ def test_yours_empty_prints_message(monkeypatch, capsys) -> None:
 
 def test_yours_markdown_format(monkeypatch, capsys) -> None:
     _stub_yours(monkeypatch, issues=[_issue(1)], total=1)
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--format", "markdown"])
-    ) == 0
+    assert issues_cli.run(cli.parse_args(["issues", "--format", "markdown"])) == 0
     out = capsys.readouterr().out
     assert "[#1](https://github.com/an-org/repo-a/issues/1)" in out
     assert "Issue 1" in out
@@ -496,9 +503,10 @@ def test_sprint_renders_table_with_items(monkeypatch, capsys) -> None:
 
 def test_sprint_markdown_format(monkeypatch, capsys) -> None:
     _stub_sprint(monkeypatch, viewer="me", items=[_sprint_item(1)])
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--sprint", "--format", "markdown"])
-    ) == 0
+    assert (
+        issues_cli.run(cli.parse_args(["issues", "--sprint", "--format", "markdown"]))
+        == 0
+    )
     out = capsys.readouterr().out
     assert "## Sprint 7 · current sprint" in out
     assert "[#1](https://github.com/an-org/a-repo/issues/1)" in out
@@ -506,9 +514,148 @@ def test_sprint_markdown_format(monkeypatch, capsys) -> None:
 
 def test_sprint_show_key_prints_sprint_key(monkeypatch, capsys) -> None:
     _stub_sprint(monkeypatch, viewer="me", items=[_sprint_item(1)])
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--sprint", "--show-key"])
-    ) == 0
+    assert issues_cli.run(cli.parse_args(["issues", "--sprint", "--show-key"])) == 0
     out = capsys.readouterr().out
     assert "Key" in out
     assert "someone else's / unassigned row" in out
+
+
+class _StubbornWrapper(io.TextIOWrapper):
+    """A stream that refuses an encoding change but accepts an error-handler one."""
+
+    def reconfigure(self, **kwargs: Any) -> None:  # type: ignore[override]
+        if "encoding" in kwargs:
+            raise ValueError("encoding is fixed")
+        super().reconfigure(**kwargs)
+
+
+def test_tolerate_unencodable_switches_stream_to_utf8() -> None:
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1252")
+    with pytest.raises(UnicodeEncodeError):
+        stream.write("⚠")
+    cli.tolerate_unencodable(stream)
+    stream.write("ok ⚠ ✓")
+    stream.flush()
+    assert raw.getvalue() == "ok ⚠ ✓".encode()
+
+
+def test_tolerate_unencodable_falls_back_to_replacement() -> None:
+    raw = io.BytesIO()
+    stream = _StubbornWrapper(raw, encoding="cp1252")
+    cli.tolerate_unencodable(stream)
+    stream.write("ok ⚠")
+    stream.flush()
+    assert raw.getvalue() == b"ok ?"
+
+
+def test_tolerate_unencodable_ignores_streams_without_reconfigure() -> None:
+    cli.tolerate_unencodable(io.StringIO())  # no reconfigure(); must not raise
+
+
+def test_main_survives_cp1252_stdout_and_stderr(monkeypatch) -> None:
+    """Goes through main(): fails if the reconfigure calls are dropped."""
+    out_raw, err_raw = io.BytesIO(), io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(out_raw, encoding="cp1252"))
+    monkeypatch.setattr(sys, "stderr", io.TextIOWrapper(err_raw, encoding="cp1252"))
+
+    def glyphs(args: Any) -> int:
+        print("✓ 🚀")
+        print("⚠", file=sys.stderr)
+        return 0
+
+    monkeypatch.setitem(cli._COMMANDS, "issues", glyphs)
+    assert cli.main(["issues"]) == 0
+    sys.stdout.flush()
+    sys.stderr.flush()
+    assert out_raw.getvalue() == "✓ 🚀\n".encode()
+    assert err_raw.getvalue() == "⚠\n".encode()
+
+
+def _install_command(monkeypatch, exc: BaseException) -> None:
+    def boom(args: Any) -> int:
+        raise exc
+
+    monkeypatch.setitem(cli._COMMANDS, "issues", boom)
+
+
+def test_keyboard_interrupt_exits_130_without_traceback(monkeypatch, capsys) -> None:
+    _install_command(monkeypatch, KeyboardInterrupt())
+    assert cli.main(["issues"]) == 130
+    captured = capsys.readouterr()
+    assert "Interrupted." in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_broken_pipe_returns_141_when_stdout_has_no_fd(monkeypatch, capsys) -> None:
+    _install_command(monkeypatch, BrokenPipeError())
+    monkeypatch.setattr(cli.os, "open", lambda *a: pytest.fail("opened devnull"))
+    assert cli.main(["issues"]) == 141
+    assert capsys.readouterr().err == ""
+
+
+def test_broken_pipe_is_silent_end_to_end() -> None:
+    """Real pipe: reader closes early; the process must exit 141 with no stderr."""
+    import subprocess
+    from pathlib import Path
+
+    code = (
+        "import sys; from plate import cli\n"
+        "def spew(a):\n"
+        "    for _ in range(20000): print('x' * 100)\n"
+        "    return 0\n"
+        "cli._COMMANDS['issues'] = spew\n"
+        "sys.exit(cli.main(['issues']))\n"
+    )
+    src = str(Path(__file__).resolve().parent.parent / "src")
+    proc = subprocess.Popen(
+        [sys.executable, "-c", code],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={**os.environ, "PYTHONPATH": src},
+    )
+    assert proc.stdout is not None and proc.stderr is not None
+    proc.stdout.readline()
+    proc.stdout.close()
+    stderr = proc.stderr.read()
+    assert proc.wait(timeout=30) == 141
+    assert stderr == b""
+
+
+class _Tty:
+    def __init__(self, tty: bool) -> None:
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+@pytest.mark.parametrize(
+    ("mode", "env", "tty", "expected"),
+    [
+        ("always", {}, False, True),
+        ("never", {}, True, False),
+        ("auto", {}, True, True),
+        ("auto", {}, False, False),
+        ("auto", {"NO_COLOR": "1"}, True, False),
+        ("auto", {"NO_COLOR": ""}, True, True),
+        ("auto", {"FORCE_COLOR": "1"}, False, True),
+        ("auto", {"FORCE_COLOR": ""}, False, True),
+        ("auto", {"FORCE_COLOR": "0"}, True, False),
+        ("auto", {"FORCE_COLOR": "false"}, True, False),
+        ("auto", {"NO_COLOR": "1", "FORCE_COLOR": "1"}, True, False),
+        ("always", {"NO_COLOR": "1"}, False, True),
+        ("never", {"FORCE_COLOR": "1"}, True, False),
+    ],
+)
+def test_color_enabled_resolution(monkeypatch, mode, env, tty, expected) -> None:
+    from types import SimpleNamespace
+
+    from plate.core import render
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(render, "sys", SimpleNamespace(stdout=_Tty(tty)))
+    assert render.color_enabled(mode) is expected

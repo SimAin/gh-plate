@@ -161,9 +161,7 @@ def test_summary_line_present(monkeypatch, capsys) -> None:
 def test_markdown_format(monkeypatch, capsys) -> None:
     prs = [_pr(1, "Mine", author="simon")]
     _stub_fetch(monkeypatch, prs=prs, login="simon")
-    assert (
-        cli.main(["prs", "--repo", "acme/widget", "--format", "markdown"]) == 0
-    )
+    assert cli.main(["prs", "--repo", "acme/widget", "--format", "markdown"]) == 0
     out = capsys.readouterr().out
     assert "| PR ID | Title |" in out
     assert "#1" in out
@@ -185,9 +183,7 @@ def test_show_key_prints_key(monkeypatch, capsys) -> None:
 def test_limit_hit_note(monkeypatch, capsys) -> None:
     prs = [_pr(1, "Mine", author="simon")]
     _stub_fetch(monkeypatch, prs=prs, login="simon")
-    assert (
-        cli.main(["prs", "--repo", "acme/widget", "--limit", "1"]) == 0
-    )
+    assert cli.main(["prs", "--repo", "acme/widget", "--limit", "1"]) == 0
     err = capsys.readouterr().err
     assert "fetched 1 open PRs; there may be more not shown." in err
 
@@ -266,9 +262,7 @@ def _stub_owner(
     from plate.core import config, gh
 
     calls: dict[str, Any] = {}
-    monkeypatch.setattr(
-        config, "load_config", lambda *a, **k: cfg or config.Config()
-    )
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: cfg or config.Config())
     monkeypatch.setattr(gh, "current_login", lambda: login)
     monkeypatch.setattr(gh, "current_repo", _boom_current_repo)
     monkeypatch.setattr(gh, "resolve_owner_type", lambda owner: owner_type)
@@ -302,9 +296,10 @@ def test_owner_groups_output_by_repo(monkeypatch, capsys) -> None:
         _owner_pr(2, "Old one", repo="an-org/repo-a"),
     ]
     _stub_owner(monkeypatch, prs=prs, total=2)
-    assert prs_cli.run(
-        cli.parse_args(["prs", "--owner", "an-org", "--color", "never"])
-    ) == 0
+    assert (
+        prs_cli.run(cli.parse_args(["prs", "--owner", "an-org", "--color", "never"]))
+        == 0
+    )
     out = capsys.readouterr().out
     assert "── an-org/repo-b · 1 open" in out
     assert "── an-org/repo-a · 1 open" in out
@@ -330,9 +325,7 @@ def test_owner_literal_shows_no_arrow(monkeypatch, capsys) -> None:
 
 def test_owner_mine_flag_reaches_the_fetch(monkeypatch, capsys) -> None:
     calls = _stub_owner(monkeypatch, prs=[_owner_pr(1)], total=1)
-    assert prs_cli.run(
-        cli.parse_args(["prs", "--owner", "an-org", "--mine"])
-    ) == 0
+    assert prs_cli.run(cli.parse_args(["prs", "--owner", "an-org", "--mine"])) == 0
     assert calls["mine"] is True
 
 
@@ -386,9 +379,7 @@ def test_owner_empty_default_message(monkeypatch, capsys) -> None:
 
 def test_owner_empty_mine_message(monkeypatch, capsys) -> None:
     calls = _stub_owner(monkeypatch, prs=[], total=0)
-    assert prs_cli.run(
-        cli.parse_args(["prs", "--owner", "an-org", "--mine"])
-    ) == 0
+    assert prs_cli.run(cli.parse_args(["prs", "--owner", "an-org", "--mine"])) == 0
     assert calls["mine"] is True
     assert "No open PRs authored by you for an-org." in capsys.readouterr().out
 
@@ -396,9 +387,9 @@ def test_owner_empty_mine_message(monkeypatch, capsys) -> None:
 def test_owner_truncation_note_limit_hit(monkeypatch, capsys) -> None:
     prs = [_owner_pr(n) for n in range(1, 3)]
     _stub_owner(monkeypatch, prs=prs, total=5)
-    assert prs_cli.run(
-        cli.parse_args(["prs", "--owner", "an-org", "--limit", "2"])
-    ) == 0
+    assert (
+        prs_cli.run(cli.parse_args(["prs", "--owner", "an-org", "--limit", "2"])) == 0
+    )
     err = capsys.readouterr().err
     assert "showing 2 of 5 open PRs for an-org (--limit 2)." in err
 
@@ -422,9 +413,12 @@ def test_owner_no_note_when_complete(monkeypatch, capsys) -> None:
 
 def test_owner_markdown_format(monkeypatch, capsys) -> None:
     _stub_owner(monkeypatch, prs=[_owner_pr(1)], total=1)
-    assert prs_cli.run(
-        cli.parse_args(["prs", "--owner", "an-org", "--format", "markdown"])
-    ) == 0
+    assert (
+        prs_cli.run(
+            cli.parse_args(["prs", "--owner", "an-org", "--format", "markdown"])
+        )
+        == 0
+    )
     out = capsys.readouterr().out
     assert "## an-org/repo-a" in out
     assert "| PR ID | Title |" in out
@@ -432,9 +426,14 @@ def test_owner_markdown_format(monkeypatch, capsys) -> None:
 
 def test_owner_show_key_prints_owner_key(monkeypatch, capsys) -> None:
     _stub_owner(monkeypatch, prs=[_owner_pr(1)], total=1)
-    assert prs_cli.run(
-        cli.parse_args(["prs", "--owner", "an-org", "--show-key", "--color", "never"])
-    ) == 0
+    assert (
+        prs_cli.run(
+            cli.parse_args(
+                ["prs", "--owner", "an-org", "--show-key", "--color", "never"]
+            )
+        )
+        == 0
+    )
     out = capsys.readouterr().out
     assert "Key" in out
     assert "grouped by repository" in out
@@ -446,9 +445,10 @@ def test_owner_summary_line_present(monkeypatch, capsys) -> None:
         _owner_pr(2, "Review this", author="alice"),
     ]
     _stub_owner(monkeypatch, prs=prs, total=2)
-    assert prs_cli.run(
-        cli.parse_args(["prs", "--owner", "an-org", "--color", "never"])
-    ) == 0
+    assert (
+        prs_cli.run(cli.parse_args(["prs", "--owner", "an-org", "--color", "never"]))
+        == 0
+    )
     out = capsys.readouterr().out
     assert "2 open" in out
     assert "1 to review" in out
@@ -483,9 +483,7 @@ def test_timeline_ignored_for_markdown(monkeypatch, capsys) -> None:
         monkeypatch, prs=[_pr(1, "Mine", author="simon")], login="simon"
     )
     assert (
-        cli.main(
-            ["prs", "--repo", "acme/widget", "--timeline", "--format", "markdown"]
-        )
+        cli.main(["prs", "--repo", "acme/widget", "--timeline", "--format", "markdown"])
         == 0
     )
     assert calls["timeline"] is False

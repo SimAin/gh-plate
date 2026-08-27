@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 
 from plate.core import gh
 from plate.core.gh import PlateError
+from plate.core.render import color_enabled
 
 from . import github, render
 from .model import (
@@ -67,7 +68,8 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "--color",
         choices=("auto", "always", "never"),
         default="auto",
-        help="Colour terminal output. Defaults to auto.",
+        help="Colour terminal output. Defaults to auto, which honours NO_COLOR "
+        "and FORCE_COLOR and otherwise colours only a terminal.",
     )
 
 
@@ -100,10 +102,7 @@ def run(args: argparse.Namespace) -> int:
     if args.format == "markdown":
         print(render.markdown_table(sections, args.days))
     else:
-        use_color = args.color == "always" or (
-            args.color == "auto" and sys.stdout.isatty()
-        )
-        print(render.panel(sections, args.days, now, use_color))
+        print(render.panel(sections, args.days, now, color_enabled(args.color)))
 
     notes = [
         truncation_note("PRs opened", len(opened_items), opened_total),

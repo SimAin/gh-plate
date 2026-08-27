@@ -96,17 +96,11 @@ def panel(
     sections: list[RetroSection], days: int, now: datetime, use_color: bool
 ) -> str:
     """One self-contained panel per owner, most active owner first."""
-    blocks = [
-        _section_lines(section, days, now, use_color) for section in sections
-    ]
-    width = max(
-        visible_length(line) for block in blocks for line in block
-    )
+    blocks = [_section_lines(section, days, now, use_color) for section in sections]
+    width = max(visible_length(line) for block in blocks for line in block)
     lines: list[str] = []
     for section, block in zip(sections, blocks, strict=True):
-        lines.append(
-            divider(f"{section.owner} · last {days} days", width, use_color)
-        )
+        lines.append(divider(f"{section.owner} · last {days} days", width, use_color))
         lines.extend(block)
     return "\n".join(lines)
 
@@ -119,8 +113,7 @@ def markdown_table(sections: list[RetroSection], days: int) -> str:
         lines = ["| Channel | Total | Last |", "| --- | --- | --- |"]
         for channel in section.channels:
             lines.append(
-                f"| {channel.label} | {channel.total} | "
-                f"{_annotation(channel, days)} |"
+                f"| {channel.label} | {channel.total} | {_annotation(channel, days)} |"
             )
         parts.append(f"## {section.owner}\n\n" + "\n".join(lines))
     return "\n\n".join(parts)

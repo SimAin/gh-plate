@@ -75,9 +75,7 @@ def _search_prs(login: str, qualifiers: str) -> tuple[list[dict[str, Any]], int]
             f"search/issues?q=author:{login}+is:pr+{qualifiers}"
             f"&per_page={SEARCH_PER_PAGE}&page={page}"
         )
-        if not isinstance(payload, dict) or not isinstance(
-            payload.get("items"), list
-        ):
+        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
             raise gh.PlateError("GitHub returned an unexpected search payload.")
         count = payload.get("total_count")
         if isinstance(count, int):  # a later page missing it keeps page 1's
@@ -122,7 +120,5 @@ def fetch_compares(
     """
     if not ranges:
         return []
-    with ThreadPoolExecutor(
-        max_workers=min(COMPARE_WORKERS, len(ranges))
-    ) as executor:
+    with ThreadPoolExecutor(max_workers=min(COMPARE_WORKERS, len(ranges))) as executor:
         return list(executor.map(lambda r: _fetch_compare(*r), ranges))

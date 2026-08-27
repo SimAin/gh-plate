@@ -51,17 +51,17 @@ STALE = "stale"
 # Row classes for the owner-wide view (issue #43), where ALL open issues are
 # shown — not just yours — so "mine" and "shown-for-context-only" stop being the
 # same axis. :func:`row_class` resolves a row to exactly one of these.
-ROW_MINE = "mine"              # assigned to you — full weight, health glyph
-ROW_CONTEXT = "context"        # ancestor pulled in only for structure — dimmed
+ROW_MINE = "mine"  # assigned to you — full weight, health glyph
+ROW_CONTEXT = "context"  # ancestor pulled in only for structure — dimmed
 ROW_UNASSIGNED = "unassigned"  # open, nobody assigned — full weight (yours to grab)
-ROW_OTHERS = "others"          # assigned to someone else — dimmed whole
+ROW_OTHERS = "others"  # assigned to someone else — dimmed whole
 
 # Linked-PR ("fix in flight") states, in the priority used to pick which one to
 # surface when an issue links several PRs. Live work outranks a landed or dead
 # attempt: an open fix is the thing you care about, a merged PR on a still-open
 # issue is a nudge, a closed-unmerged PR is a dead end shown only for context.
-PR_OPEN = "open"      # open, ready for review
-PR_DRAFT = "draft"    # open, still a draft (WIP)
+PR_OPEN = "open"  # open, ready for review
+PR_DRAFT = "draft"  # open, still a draft (WIP)
 PR_MERGED = "merged"  # merged, yet the issue is still open
 PR_CLOSED = "closed"  # closed without merging — an abandoned attempt
 _PR_PRIORITY = [PR_OPEN, PR_DRAFT, PR_MERGED, PR_CLOSED]
@@ -102,7 +102,7 @@ class IssueRow:
     mine: bool
     context: bool = False
     assignees: list[str] = field(default_factory=list)
-    pr_state: str | None = None   # dominant linked-PR state, or None if unlinked
+    pr_state: str | None = None  # dominant linked-PR state, or None if unlinked
     pr_number: int | None = None  # the PR backing pr_state (for markdown / links)
 
     @property
@@ -393,8 +393,12 @@ def build_index(
             key = (ancestor_repo, int(ancestor["number"]))
             if key not in index:
                 index[key] = _row_from_issue(
-                    ancestor, now, stale_days,
-                    context=True, mine=False, default_repo=owned_repo,
+                    ancestor,
+                    now,
+                    stale_days,
+                    context=True,
+                    mine=False,
+                    default_repo=owned_repo,
                 )
     return index
 
@@ -600,9 +604,7 @@ class SprintView:
 # :func:`normalize_status`) so a configured ``statusOrder`` entry matches what
 # the user actually sees on screen, not the board's raw (possibly
 # emoji-prefixed) name. Escapes are spelled out so the class stays legible.
-_EMOJI_RE = re.compile(
-    "[\U0001f000-\U0001faff\U00002600-\U000027bf\ufe0f\u200d]+"
-)
+_EMOJI_RE = re.compile("[\U0001f000-\U0001faff\U00002600-\U000027bf\ufe0f\u200d]+")
 
 
 def strip_emoji(value: str) -> str:

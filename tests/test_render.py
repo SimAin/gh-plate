@@ -66,6 +66,7 @@ def sample_forest() -> list[TreeNode]:
 
 # --- primitives --------------------------------------------------------------
 
+
 def test_format_age_units() -> None:
     assert render.format_age(3) == "3d"
     assert render.format_age(21) == "3w"
@@ -115,12 +116,16 @@ def test_truncate_double_width_never_splits_glyph() -> None:
 def test_format_labels_packs_whole_labels_with_overflow_count() -> None:
     # one whole label fits, the rest become +N (never mashed/mid-word)
     assert render.format_labels(["security", "automation"], 18) == "security +1"
-    assert render.format_labels(
-        ["epic", "needs refinement", "Vulnerability Discovery"], 18
-    ) == "epic +2"
-    assert render.format_labels(
-        ["infrastructure", "feature", "performance"], 18
-    ) == "infrastructure +2"
+    assert (
+        render.format_labels(
+            ["epic", "needs refinement", "Vulnerability Discovery"], 18
+        )
+        == "epic +2"
+    )
+    assert (
+        render.format_labels(["infrastructure", "feature", "performance"], 18)
+        == "infrastructure +2"
+    )
 
 
 def test_format_labels_keeps_multiple_short_labels() -> None:
@@ -148,9 +153,9 @@ def test_format_labels_promotes_and_colours_special_label() -> None:
         ["bug", "blocked"], 18, use_color=True, resolver=resolver
     )
     visible = render.visible_text(out)
-    assert visible.startswith("blocked")          # promoted to the front
-    assert render.SOFT_ROSE in out                # alert -> red
-    assert "bug" in visible                        # ordinary label still present
+    assert visible.startswith("blocked")  # promoted to the front
+    assert render.SOFT_ROSE in out  # alert -> red
+    assert "bug" in visible  # ordinary label still present
 
 
 def test_format_labels_hides_hidden_labels() -> None:
@@ -203,9 +208,9 @@ def test_markdown_bolds_special_label_and_drops_hidden() -> None:
     row = make_row(5, title="T", labels=["blocked", "bug", "noise"])
     resolver = {"blocked": "alert", "noise": "hide"}.get
     out = render.markdown_tree([TreeNode(row, 0)], resolver)
-    assert "**blocked**" in out                    # special, bolded + promoted
+    assert "**blocked**" in out  # special, bolded + promoted
     assert "bug" in out
-    assert "noise" not in out                       # hidden
+    assert "noise" not in out  # hidden
 
 
 def test_visible_length_ignores_ansi() -> None:
@@ -236,15 +241,16 @@ def test_visible_length_ignores_nested_link_and_color() -> None:
 
 # --- terminal tree -----------------------------------------------------------
 
+
 def test_terminal_tree_no_color_structure() -> None:
     out = render.terminal_tree(sample_forest(), use_color=False)
-    assert "\033[" not in out                 # no ANSI when colour off
-    assert "── yours (2) ──" in out            # counts owned rows, not the context epic
+    assert "\033[" not in out  # no ANSI when colour off
+    assert "── yours (2) ──" in out  # counts owned rows, not the context epic
     # un-owned epic marked · with blank health+PR columns before the number
     assert render.CONTEXT_GLYPH + "   #10" in out
-    assert "•" in out                          # stale owned child
-    assert "✓" in out                          # active standalone
-    assert "1/4" in out                        # epic rollup shown
+    assert "•" in out  # stale owned child
+    assert "✓" in out  # active standalone
+    assert "1/4" in out  # epic rollup shown
 
 
 def test_terminal_tree_indents_children() -> None:
@@ -260,17 +266,27 @@ def test_terminal_tree_color_emits_ansi() -> None:
     assert "\033[" in out
 
 
-def test_terminal_tree_links_numbers_when_color_on() -> None:
+def test_terminal_tree_links_numbers_when_links_on() -> None:
+    out = render.terminal_tree(sample_forest(), use_color=False, use_links=True)
+    assert "\033]8;;" in out  # OSC-8 present
+    assert "https://github.com/an-org/a-repo/issues/3" in out  # owned row link
+    assert "https://github.com/an-org/a-repo/issues/10" in out  # context epic link
+
+
+def test_terminal_tree_links_are_independent_of_color() -> None:
     out = render.terminal_tree(sample_forest(), use_color=True)
-    assert "\033]8;;" in out                                   # OSC-8 present
-    assert "https://github.com/an-org/a-repo/issues/3" in out       # owned row link
-    assert "https://github.com/an-org/a-repo/issues/10" in out      # context epic link
-
-
-def test_terminal_tree_no_links_when_color_off() -> None:
-    out = render.terminal_tree(sample_forest(), use_color=False)
+    assert "\033[" in out
     assert "\033]8;;" not in out
     assert "https://" not in out
+
+
+def test_sprint_and_owner_views_link_only_when_links_on() -> None:
+    sprint_on = render.sprint_table(_view(), use_color=False, use_links=True)
+    sprint_off = render.sprint_table(_view(), use_color=True)
+    owner_on = render.owner_tree(owner_sections(), use_color=False, use_links=True)
+    owner_off = render.owner_tree(owner_sections(), use_color=True)
+    assert "\033]8;;" in sprint_on and "\033]8;;" in owner_on
+    assert "\033]8;;" not in sprint_off and "\033]8;;" not in owner_off
 
 
 def test_pr_marker_beside_health_glyph() -> None:
@@ -297,8 +313,8 @@ def test_pr_marker_colours_merged_green_closed_red() -> None:
 
     merged = render._pr_marker(PR_MERGED, use_color=True)
     closed = render._pr_marker(PR_CLOSED, use_color=True)
-    assert render.SOFT_GREEN in merged          # merged ⇄ tinted green
-    assert render.SOFT_ROSE in closed           # closed ✗ tinted red
+    assert render.SOFT_GREEN in merged  # merged ⇄ tinted green
+    assert render.SOFT_ROSE in closed  # closed ✗ tinted red
     assert render.PR_GLYPHS[PR_MERGED][0] == render.PR_GLYPHS[PR_OPEN][0]  # same glyph
 
 
@@ -315,11 +331,12 @@ def test_context_node_blank_age_owned_child_has_age() -> None:
     lines = render.terminal_tree(sample_forest(), use_color=False).splitlines()
     epic_line = next(line for line in lines if "#10" in line)
     child_line = next(line for line in lines if "#11" in line)
-    assert "7w" in child_line          # 50 days -> 7w on the owned child
-    assert "7w" not in epic_line        # context epic carries no age
+    assert "7w" in child_line  # 50 days -> 7w on the owned child
+    assert "7w" not in epic_line  # context epic carries no age
 
 
 # --- markdown tree -----------------------------------------------------------
+
 
 def test_markdown_tree_is_nested_list() -> None:
     out = render.markdown_tree(sample_forest())
@@ -385,10 +402,22 @@ def make_sprint_row(
 def _view() -> SprintView:
     return SprintView(
         title="Sprint 7",
-        yours=[make_sprint_row(3, title="Mine", assignees=["me"], is_mine=True,
-                               status="🚀 Shipping", pr_state="open", pr_number=99)],
-        others=[make_sprint_row(2, title="Theirs", assignees=["a-teammate"],
-                                status="🛠 Building")],
+        yours=[
+            make_sprint_row(
+                3,
+                title="Mine",
+                assignees=["me"],
+                is_mine=True,
+                status="🚀 Shipping",
+                pr_state="open",
+                pr_number=99,
+            )
+        ],
+        others=[
+            make_sprint_row(
+                2, title="Theirs", assignees=["a-teammate"], status="🛠 Building"
+            )
+        ],
         unassigned=[make_sprint_row(1, title="Free", is_unassigned=True)],
     )
 
@@ -412,12 +441,12 @@ def test_sprint_table_has_assignee_and_stripped_status() -> None:
     assert "Assignee" in out and "Status" in out
     assert "a-teammate" in out
     assert "Shipping" in out and "Building" in out
-    assert "🚀" not in out and "🛠" not in out   # emoji stripped in terminal
+    assert "🚀" not in out and "🛠" not in out  # emoji stripped in terminal
 
 
 def test_sprint_table_plain_when_color_off() -> None:
     out = render.sprint_table(_view(), use_color=False)
-    assert "\033[" not in out   # no ANSI when colour disabled
+    assert "\033[" not in out  # no ANSI when colour disabled
 
 
 def test_sprint_table_hides_hidden_label_on_others_row() -> None:
@@ -425,8 +454,11 @@ def test_sprint_table_hides_hidden_label_on_others_row() -> None:
     view = SprintView(
         title="S",
         yours=[],
-        others=[make_sprint_row(2, title="Theirs", assignees=["a-teammate"],
-                                labels=["wontfix", "bug"])],
+        others=[
+            make_sprint_row(
+                2, title="Theirs", assignees=["a-teammate"], labels=["wontfix", "bug"]
+            )
+        ],
         unassigned=[],
     )
     out = render.sprint_table(view, use_color=False, resolver=resolver)
@@ -441,12 +473,15 @@ def test_sprint_table_others_row_colour_label_not_promoted() -> None:
     view = SprintView(
         title="S",
         yours=[],
-        others=[make_sprint_row(2, title="Theirs", assignees=["a-teammate"],
-                                labels=["bug", "blocked"])],
+        others=[
+            make_sprint_row(
+                2, title="Theirs", assignees=["a-teammate"], labels=["bug", "blocked"]
+            )
+        ],
         unassigned=[],
     )
     out = render.sprint_table(view, use_color=True, resolver=resolver)
-    assert render.SOFT_ROSE not in out   # no colour promotion on others rows
+    assert render.SOFT_ROSE not in out  # no colour promotion on others rows
     visible = render.visible_text(out)
     assert "bug" in visible and "blocked" in visible
 
@@ -458,13 +493,17 @@ def test_sprint_markdown_sections_and_emoji_kept() -> None:
     assert "### unassigned (1)" in out
     assert "[#3](https://github.com/an-org/a-repo/issues/3)" in out
     assert "@a-teammate" in out
-    assert "🚀 Shipping" in out             # markdown keeps the emoji
-    assert "⇄ #99 open" in out              # PR marker rendered
+    assert "🚀 Shipping" in out  # markdown keeps the emoji
+    assert "⇄ #99 open" in out  # PR marker rendered
 
 
 def test_sprint_markdown_marks_empty_bucket() -> None:
-    view = SprintView(title="S", yours=[], others=[], unassigned=[
-        make_sprint_row(1, is_unassigned=True)])
+    view = SprintView(
+        title="S",
+        yours=[],
+        others=[],
+        unassigned=[make_sprint_row(1, is_unassigned=True)],
+    )
     out = render.sprint_markdown(view)
     assert "### yours (0)\n- *none*" in out
 
@@ -490,25 +529,59 @@ def owner_sections() -> list[tuple[str, list[TreeNode]]]:
     # repo-x: a context epic over a mine row, an others row, and an unassigned
     # row; repo-y: a single standalone mine row.
     mine = TreeNode(
-        make_row(11, title="Mine task", mine=True, context=False,
-                 assignees=["me"], age_days=40, is_stale=True), depth=1
+        make_row(
+            11,
+            title="Mine task",
+            mine=True,
+            context=False,
+            assignees=["me"],
+            age_days=40,
+            is_stale=True,
+        ),
+        depth=1,
     )
     others = TreeNode(
-        make_row(12, title="Theirs", mine=False, context=False,
-                 assignees=["alice"], age_days=5, is_stale=False), depth=1
+        make_row(
+            12,
+            title="Theirs",
+            mine=False,
+            context=False,
+            assignees=["alice"],
+            age_days=5,
+            is_stale=False,
+        ),
+        depth=1,
     )
     free = TreeNode(
-        make_row(13, title="Free task", mine=False, context=False,
-                 assignees=[], age_days=3, is_stale=False), depth=1
+        make_row(
+            13,
+            title="Free task",
+            mine=False,
+            context=False,
+            assignees=[],
+            age_days=3,
+            is_stale=False,
+        ),
+        depth=1,
     )
     epic = TreeNode(
-        make_row(10, title="Epic", mine=False, context=True,
-                 sub_total=4, sub_completed=1),
-        depth=0, children=[mine, others, free],
+        make_row(
+            10, title="Epic", mine=False, context=True, sub_total=4, sub_completed=1
+        ),
+        depth=0,
+        children=[mine, others, free],
     )
     standalone = TreeNode(
-        make_row(20, repo="an-org/repo-y", title="Solo", mine=True,
-                 assignees=["me"], age_days=2, is_stale=False), depth=0
+        make_row(
+            20,
+            repo="an-org/repo-y",
+            title="Solo",
+            mine=True,
+            assignees=["me"],
+            age_days=2,
+            is_stale=False,
+        ),
+        depth=0,
     )
     return [("an-org/repo-x", [epic]), ("an-org/repo-y", [standalone])]
 
@@ -527,8 +600,8 @@ def test_owner_tree_row_weights_by_class() -> None:
     others_line = next(line for line in lines if "#12" in line)
     free_line = next(line for line in lines if "#13" in line)
     epic_line = next(line for line in lines if "#10" in line)
-    assert "•" in mine_line                       # mine, stale -> health glyph
-    assert "alice" in others_line                 # others -> assignee shown
+    assert "•" in mine_line  # mine, stale -> health glyph
+    assert "alice" in others_line  # others -> assignee shown
     assert "✓" in free_line and "—" in free_line  # unassigned: glyph + em dash
     # context ancestor: neutral glyph, rollup, no health glyph / assignee
     assert render.CONTEXT_GLYPH + "   #10" in epic_line
@@ -538,7 +611,7 @@ def test_owner_tree_row_weights_by_class() -> None:
 def test_owner_tree_others_row_dimmed_whole() -> None:
     out = render.owner_tree(owner_sections(), use_color=True)
     others_line = next(line for line in out.splitlines() if "#12" in line)
-    assert others_line.startswith(render.DIM)          # whole line dimmed
+    assert others_line.startswith(render.DIM)  # whole line dimmed
     assert "alice" in render.visible_text(others_line)
 
 

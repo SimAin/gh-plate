@@ -163,9 +163,7 @@ query($q: String!, $pageSize: Int!, $endCursor: String) {
 """
 
 
-def owner_search_query(
-    owner: str, owner_type: str, login: str, *, mine: bool
-) -> str:
+def owner_search_query(owner: str, owner_type: str, login: str, *, mine: bool) -> str:
     """The GitHub search string for every open PR across ``owner``.
 
     ``owner_type`` (``"organization"`` or ``"user"`` — the same vocabulary as
@@ -185,9 +183,7 @@ def owner_search_query(
     active-first ethos everywhere else (D1, D6).
     """
     qualifier = "org" if owner_type == "organization" else "user"
-    query_str = (
-        f"{qualifier}:{owner} is:pr is:open archived:false sort:updated-desc"
-    )
+    query_str = f"{qualifier}:{owner} is:pr is:open archived:false sort:updated-desc"
     if mine:
         query_str += f" author:{login}"
     return query_str

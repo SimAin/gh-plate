@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 
 from plate.core import config, gh
 from plate.core.gh import PlateError
+from plate.core.render import color_enabled
 
 from . import github, render
 from .model import build_forest, build_index, build_sprint_view, group_by_repo
@@ -32,9 +33,7 @@ DEFAULT_STALE_DAYS = 14
 def _positive_int(value: str) -> int:
     parsed = int(value)
     if parsed < 1:
-        raise argparse.ArgumentTypeError(
-            f"must be a positive integer, got '{value}'"
-        )
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got '{value}'")
     return parsed
 
 
@@ -70,7 +69,8 @@ def _add_issues_flags(parser: argparse.ArgumentParser) -> None:
         "--color",
         choices=("auto", "always", "never"),
         default="auto",
-        help="Colour terminal output. Defaults to auto.",
+        help="Colour terminal output. Defaults to auto, which honours NO_COLOR "
+        "and FORCE_COLOR and otherwise colours only a terminal.",
     )
     parser.add_argument(
         "--stale-days",
@@ -114,12 +114,6 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "across every repository of an owner with --owner.",
     )
     _add_issues_flags(issues)
-
-
-def _use_color(args: argparse.Namespace) -> bool:
-    return args.color == "always" or (
-        args.color == "auto" and sys.stdout.isatty()
-    )
 
 
 def _require_login(viewer: str | None) -> str:
@@ -182,11 +176,15 @@ def _run_yours(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
     if args.format == "markdown":
         print(render.markdown_tree(forest, cfg.style_for))
     else:
-        use_color = _use_color(args)
+        use_color = color_enabled(args.color)
         if args.show_key:
             print(render.symbol_key(use_color))
             print()
-        print(render.terminal_tree(forest, use_color, cfg.style_for))
+        print(
+            render.terminal_tree(
+                forest, use_color, cfg.style_for, use_links=sys.stdout.isatty()
+            )
+        )
 
     if len(issues) == args.limit and total > args.limit:
         print(
@@ -213,9 +211,7 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
             aliases = ", ".join(
                 f"{alias} → {owner}" for alias, owner in cfg.owners.items()
             )
-            raise PlateError(
-                f"{exc}\nConfigured aliases: {aliases}"
-            ) from exc
+            raise PlateError(f"{exc}\nConfigured aliases: {aliases}") from exc
         raise
 
     issues, total, viewer = github.fetch_owner_issues(
@@ -246,13 +242,17 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
             print()
         print(render.owner_markdown(sections, cfg.style_for))
     else:
-        use_color = _use_color(args)
+        use_color = color_enabled(args.color)
         if args.show_key:
             print(render.owner_key(use_color))
             print()
         if alias_fired:
             print(render.dim(display, use_color))
-        print(render.owner_tree(sections, use_color, cfg.style_for))
+        print(
+            render.owner_tree(
+                sections, use_color, cfg.style_for, use_links=sys.stdout.isatty()
+            )
+        )
 
     if len(issues) < total:
         if len(issues) == args.limit:
@@ -276,7 +276,7 @@ def _run_sprint(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
     if project is None:
         raise PlateError(
             f"No sprint board configured for {repo}.\n"
-            "Add a \"repos\" entry mapping it to a GitHub project board in your "
+            'Add a "repos" entry mapping it to a GitHub project board in your '
             f"config ({args.config or config.config_path()}). See the README."
         )
 
@@ -317,9 +317,13 @@ def _run_sprint(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
     if args.format == "markdown":
         print(render.sprint_markdown(view, cfg.style_for))
     else:
-        use_color = _use_color(args)
+        use_color = color_enabled(args.color)
         if args.show_key:
             print(render.sprint_key(use_color))
             print()
-        print(render.sprint_table(view, use_color, cfg.style_for))
+        print(
+            render.sprint_table(
+                view, use_color, cfg.style_for, use_links=sys.stdout.isatty()
+            )
+        )
     return 0

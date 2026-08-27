@@ -164,9 +164,7 @@ def commits_from_compares(
                     continue
                 seen.add(sha)
             commit = item.get("commit")
-            committer = (
-                commit.get("committer") if isinstance(commit, dict) else None
-            )
+            committer = commit.get("committer") if isinstance(commit, dict) else None
             date = committer.get("date") if isinstance(committer, dict) else None
             refs.append((owner, date))
     return refs, unexpanded
@@ -199,9 +197,7 @@ def _channel(label: str, ages: list[int], days: int) -> RetroChannel:
     for age in ages:
         if 0 <= age < days:
             counts[days - 1 - age] += 1
-    last_days = next(
-        (days - 1 - i for i in range(days - 1, -1, -1) if counts[i]), None
-    )
+    last_days = next((days - 1 - i for i in range(days - 1, -1, -1) if counts[i]), None)
     return RetroChannel(
         label=label, counts=counts, total=sum(counts), last_days=last_days
     )
@@ -230,12 +226,8 @@ def build_sections(
         timestamp = parse_timestamp(raw_timestamp)
         if timestamp is None:
             return
-        owner_ages = ages.setdefault(
-            owner, {label: [] for label in CHANNEL_ORDER}
-        )
-        owner_ages[channel].append(
-            (today - timestamp.astimezone(UTC).date()).days
-        )
+        owner_ages = ages.setdefault(owner, {label: [] for label in CHANNEL_ORDER})
+        owner_ages[channel].append((today - timestamp.astimezone(UTC).date()).days)
 
     for ref in commit_refs:
         add("commits", ref)
@@ -248,14 +240,10 @@ def build_sections(
 
     sections = []
     for owner, owner_ages in ages.items():
-        channels = [
-            _channel(label, owner_ages[label], days) for label in CHANNEL_ORDER
-        ]
+        channels = [_channel(label, owner_ages[label], days) for label in CHANNEL_ORDER]
         total = sum(channel.total for channel in channels)
         if total:
-            sections.append(
-                RetroSection(owner=owner, channels=channels, total=total)
-            )
+            sections.append(RetroSection(owner=owner, channels=channels, total=total))
     return sorted(sections, key=lambda s: (-s.total, s.owner.lower()))
 
 

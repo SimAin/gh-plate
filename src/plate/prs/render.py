@@ -108,6 +108,7 @@ def _timeline_subline(row: PrRow, use_color: bool) -> str:
     line = "   " + dim("↳", cc) + " " * 7 + "".join(cells)
     return dim(line, use_color) if muted else line
 
+
 # The single source of truth for the terminal layout: Title is elastic and
 # sized to the terminal width by :func:`_columns`; every other column is fixed.
 # Each entry is ``(header, width, align)`` — the same shape the issues renderer
@@ -254,8 +255,7 @@ def _pr_row_line(
         dim(_format_comments(row.comments_count), cc),
     ]
     line = gap.join(
-        format_cell(v, w, a)
-        for v, (_, w, a) in zip(values, columns, strict=True)
+        format_cell(v, w, a) for v, (_, w, a) in zip(values, columns, strict=True)
     )
     return dim(line, use_color) if muted else line
 
@@ -291,9 +291,7 @@ def terminal_table(
             label = f"{GROUP_LABELS[group]} ({group_sizes[group]})"
             lines.append(divider(label, total, use_color))
         previous_group = group
-        lines.append(
-            _pr_row_line(row, columns, width_by, gap, use_color, use_links)
-        )
+        lines.append(_pr_row_line(row, columns, width_by, gap, use_color, use_links))
         if show_timeline:
             lines.append(_timeline_subline(row, use_color))
 

@@ -30,9 +30,7 @@ def page(
     if viewer is not None:
         data["viewer"] = {"login": viewer}
     if include_repository:
-        data["repository"] = {
-            "pullRequests": {"nodes": [pr_node(n) for n in numbers]}
-        }
+        data["repository"] = {"pullRequests": {"nodes": [pr_node(n) for n in numbers]}}
     return json.dumps({"data": data})
 
 
@@ -119,9 +117,7 @@ def _fake_run_with_stdout(stdout: str, returncode: int = 0) -> Any:
 
 
 def test_fetch_prs_and_viewer_single_page(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        gh, "run_command", _fake_run_with_stdout(page("simon", [1, 2]))
-    )
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout(page("simon", [1, 2])))
     viewer, prs = github.fetch_prs_and_viewer("an-org/a-repo", 10)
     assert viewer == "simon"
     assert [p["number"] for p in prs] == [1, 2]
@@ -378,8 +374,13 @@ def test_pr_owner_query_carries_repository_and_pr_fields() -> None:
     assert "repository { nameWithOwner }" in github.PR_OWNER_QUERY
     assert "... on PullRequest" in github.PR_OWNER_QUERY
     for field in (
-        "isDraft", "mergeable", "totalCommentsCount", "reviewDecision",
-        "latestOpinionatedReviews", "reviewRequests", "statusCheckRollup",
+        "isDraft",
+        "mergeable",
+        "totalCommentsCount",
+        "reviewDecision",
+        "latestOpinionatedReviews",
+        "reviewRequests",
+        "statusCheckRollup",
     ):
         assert field in github.PR_OWNER_QUERY
 

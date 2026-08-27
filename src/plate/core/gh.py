@@ -35,9 +35,7 @@ def run_command(args: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(args, check=False, capture_output=True, text=True)
     except FileNotFoundError as exc:
         if binary == "gh":
-            hint = (
-                "Install it from https://cli.github.com and run 'gh auth login'."
-            )
+            hint = "Install it from https://cli.github.com and run 'gh auth login'."
         else:
             hint = f"Install {binary} and ensure it is on PATH."
         raise PlateError(f"'{binary}' is not installed. {hint}") from exc
@@ -210,10 +208,15 @@ def search_paginated_with_viewer(
                 _progress(f"Fetching from GitHub for {error_context}…{fetched}")
                 page_size = min(page_cap, limit - len(nodes))
                 args = [
-                    "gh", "api", "graphql",
-                    "-f", f"query={query}",
-                    "-f", f"q={query_str}",
-                    "-F", f"pageSize={page_size}",
+                    "gh",
+                    "api",
+                    "graphql",
+                    "-f",
+                    f"query={query}",
+                    "-f",
+                    f"q={query_str}",
+                    "-F",
+                    f"pageSize={page_size}",
                 ]
                 if cursor:
                     args += ["-f", f"endCursor={cursor}"]
@@ -251,9 +254,7 @@ def search_paginated_with_viewer(
             except json.JSONDecodeError as exc:
                 raise PlateError(f"Could not parse gh response: {exc}") from exc
             if payload.get("errors"):
-                raise PlateError(
-                    "GraphQL error: " + json.dumps(payload["errors"])
-                )
+                raise PlateError("GraphQL error: " + json.dumps(payload["errors"]))
 
             data = payload.get("data") or {}
             viewer_node = data.get("viewer")
