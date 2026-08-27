@@ -135,15 +135,17 @@ def terminal_width() -> int:
 
 def color_enabled(mode: str) -> bool:
     """Resolve a --color mode. An explicit always/never wins; under auto,
-    NO_COLOR disables, FORCE_COLOR enables, otherwise colour iff stdout is a tty."""
+    NO_COLOR (non-empty) disables, then FORCE_COLOR decides (``0``/``false``
+    off, anything else on), otherwise colour iff stdout is a tty."""
     if mode == "always":
         return True
     if mode == "never":
         return False
     if os.environ.get("NO_COLOR"):
         return False
-    if os.environ.get("FORCE_COLOR"):
-        return True
+    force = os.environ.get("FORCE_COLOR")
+    if force is not None:
+        return force.lower() not in ("0", "false")
     return sys.stdout.isatty()
 
 

@@ -56,10 +56,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def tolerate_unencodable(stream: TextIO) -> None:
-    """Replace glyphs the stream's encoding can't carry (e.g. a cp1252 console)
-    instead of raising UnicodeEncodeError mid-table."""
+    """Write UTF-8 regardless of locale (a cp1252 redirect would otherwise raise
+    UnicodeEncodeError on the glyphs); if that's refused, at least replace them."""
     reconfigure = getattr(stream, "reconfigure", None)
-    if reconfigure is not None:
+    if reconfigure is None:
+        return
+    try:
+        reconfigure(encoding="utf-8", errors="replace")
+    except (LookupError, ValueError, OSError):
         reconfigure(errors="replace")
 
 
@@ -93,10 +97,14 @@ def main(argv: list[str] | None = None) -> int:
 
 def _silence_stdout() -> None:
     try:
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(devnull, sys.stdout.fileno())
+        fd = sys.stdout.fileno()
     except (OSError, ValueError):
-        pass
+        return
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull, fd)
+    finally:
+        os.close(devnull)
 
 
 if __name__ == "__main__":

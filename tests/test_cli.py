@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import io
+import os
+import sys
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -517,9 +520,16 @@ def test_sprint_show_key_prints_sprint_key(monkeypatch, capsys) -> None:
     assert "someone else's / unassigned row" in out
 
 
-def test_tolerate_unencodable_replaces_instead_of_raising() -> None:
-    import io
+class _StubbornWrapper(io.TextIOWrapper):
+    """A stream that refuses an encoding change but accepts an error-handler one."""
 
+    def reconfigure(self, **kwargs: Any) -> None:  # type: ignore[override]
+        if "encoding" in kwargs:
+            raise ValueError("encoding is fixed")
+        super().reconfigure(**kwargs)
+
+
+def test_tolerate_unencodable_switches_stream_to_utf8() -> None:
     raw = io.BytesIO()
     stream = io.TextIOWrapper(raw, encoding="cp1252")
     with pytest.raises(UnicodeEncodeError):
@@ -527,13 +537,39 @@ def test_tolerate_unencodable_replaces_instead_of_raising() -> None:
     cli.tolerate_unencodable(stream)
     stream.write("ok ⚠ ✓")
     stream.flush()
-    assert raw.getvalue() == b"ok ? ?"
+    assert raw.getvalue() == "ok ⚠ ✓".encode()
+
+
+def test_tolerate_unencodable_falls_back_to_replacement() -> None:
+    raw = io.BytesIO()
+    stream = _StubbornWrapper(raw, encoding="cp1252")
+    cli.tolerate_unencodable(stream)
+    stream.write("ok ⚠")
+    stream.flush()
+    assert raw.getvalue() == b"ok ?"
 
 
 def test_tolerate_unencodable_ignores_streams_without_reconfigure() -> None:
-    import io
-
     cli.tolerate_unencodable(io.StringIO())  # no reconfigure(); must not raise
+
+
+def test_main_survives_cp1252_stdout_and_stderr(monkeypatch) -> None:
+    """Goes through main(): fails if the reconfigure calls are dropped."""
+    out_raw, err_raw = io.BytesIO(), io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(out_raw, encoding="cp1252"))
+    monkeypatch.setattr(sys, "stderr", io.TextIOWrapper(err_raw, encoding="cp1252"))
+
+    def glyphs(args: Any) -> int:
+        print("✓ 🚀")
+        print("⚠", file=sys.stderr)
+        return 0
+
+    monkeypatch.setitem(cli._COMMANDS, "issues", glyphs)
+    assert cli.main(["issues"]) == 0
+    sys.stdout.flush()
+    sys.stderr.flush()
+    assert out_raw.getvalue() == "✓ 🚀\n".encode()
+    assert err_raw.getvalue() == "⚠\n".encode()
 
 
 def _install_command(monkeypatch, exc: BaseException) -> None:
@@ -551,11 +587,39 @@ def test_keyboard_interrupt_exits_130_without_traceback(monkeypatch, capsys) -> 
     assert "Traceback" not in captured.err
 
 
-def test_broken_pipe_exits_141_quietly(monkeypatch, capsys) -> None:
+def test_broken_pipe_returns_141_when_stdout_has_no_fd(monkeypatch, capsys) -> None:
     _install_command(monkeypatch, BrokenPipeError())
+    monkeypatch.setattr(cli.os, "open", lambda *a: pytest.fail("opened devnull"))
     assert cli.main(["issues"]) == 141
-    captured = capsys.readouterr()
-    assert captured.err == ""
+    assert capsys.readouterr().err == ""
+
+
+def test_broken_pipe_is_silent_end_to_end() -> None:
+    """Real pipe: reader closes early; the process must exit 141 with no stderr."""
+    import subprocess
+    from pathlib import Path
+
+    code = (
+        "import sys; from plate import cli\n"
+        "def spew(a):\n"
+        "    for _ in range(20000): print('x' * 100)\n"
+        "    return 0\n"
+        "cli._COMMANDS['issues'] = spew\n"
+        "sys.exit(cli.main(['issues']))\n"
+    )
+    src = str(Path(__file__).resolve().parent.parent / "src")
+    proc = subprocess.Popen(
+        [sys.executable, "-c", code],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={**os.environ, "PYTHONPATH": src},
+    )
+    assert proc.stdout is not None and proc.stderr is not None
+    proc.stdout.readline()
+    proc.stdout.close()
+    stderr = proc.stderr.read()
+    assert proc.wait(timeout=30) == 141
+    assert stderr == b""
 
 
 class _Tty:
@@ -576,17 +640,22 @@ class _Tty:
         ("auto", {"NO_COLOR": "1"}, True, False),
         ("auto", {"NO_COLOR": ""}, True, True),
         ("auto", {"FORCE_COLOR": "1"}, False, True),
+        ("auto", {"FORCE_COLOR": ""}, False, True),
+        ("auto", {"FORCE_COLOR": "0"}, True, False),
+        ("auto", {"FORCE_COLOR": "false"}, True, False),
         ("auto", {"NO_COLOR": "1", "FORCE_COLOR": "1"}, True, False),
         ("always", {"NO_COLOR": "1"}, False, True),
         ("never", {"FORCE_COLOR": "1"}, True, False),
     ],
 )
 def test_color_enabled_resolution(monkeypatch, mode, env, tty, expected) -> None:
-    from plate.core.render import color_enabled
+    from types import SimpleNamespace
+
+    from plate.core import render
 
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.delenv("FORCE_COLOR", raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
-    monkeypatch.setattr("plate.core.render.sys.stdout", _Tty(tty))
-    assert color_enabled(mode) is expected
+    monkeypatch.setattr(render, "sys", SimpleNamespace(stdout=_Tty(tty)))
+    assert render.color_enabled(mode) is expected
