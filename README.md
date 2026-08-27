@@ -46,6 +46,11 @@ pipx install git+https://github.com/SimAin/gh-plate
 
 Then `plate --help`. To work on the code itself, see [Development](#development).
 
+The distribution is named `gh-plate` (PyPI already has an unrelated `plate`);
+the command is `plate`. If you installed an earlier build as a tool called
+`plate`, remove it first (`uv tool uninstall plate`) so the two don't both
+claim the executable.
+
 ## Usage
 
 From inside any cloned GitHub repository:
