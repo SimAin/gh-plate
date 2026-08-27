@@ -3,6 +3,8 @@ name = "plate"
 dynamic = ["version"]
 description = "Terminal status table for open GitHub issues assigned to you."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = []
 
