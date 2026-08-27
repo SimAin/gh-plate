@@ -651,6 +651,7 @@ class _Tty:
         ("always", {"NO_COLOR": "1"}, False, True),
         ("never", {"FORCE_COLOR": "1"}, True, False),
         ("auto", {"TERM": "xterm-256color"}, True, True),
+        ("auto", {"TERM": "dumb-emacs-ansi"}, True, True),  # Emacs shells do colour
         ("auto", {"TERM": "dumb"}, True, False),
         ("auto", {"TERM": "dumb"}, False, False),
         ("always", {"TERM": "dumb"}, True, True),

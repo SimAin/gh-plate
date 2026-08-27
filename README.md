@@ -71,16 +71,17 @@ plate issues --stale-days 30
 plate issues --show-key
 plate issues --sprint            # the repo's current sprint (see below)
 plate issues --owner my-org      # every open issue across an owner (see below)
+plate issues --config-path       # where the config file is read from
+plate issues --config PATH       # read that config file instead
 ```
 
 If run outside a git repository without `--repo`, it prints an actionable error.
 
 `--color auto` (the default) honours [`NO_COLOR`](https://no-color.org) and
 `FORCE_COLOR` (`0`/`false` disables; `NO_COLOR` wins if both are set), and
-skips colour under `TERM=dumb` — though an *unset* `TERM` is not treated as
-dumb, since plenty of CI containers leave it unset and render colour fine.
-`FORCE_COLOR` beats `TERM=dumb`, and `--color always`/`never` override all of
-them.
+skips colour under `TERM=dumb` (the literal value only — an unset `TERM` is
+not dumb). `FORCE_COLOR` beats `TERM=dumb`; `--color always`/`never` override
+all of them.
 
 ### How to read the table
 
@@ -451,9 +452,10 @@ A recognised label is pulled to the front of the Labels cell and shown bright:
 Matching is case-insensitive and supports `*` globs for prefixed schemes. Your
 file merges over the built-in default, so you only list what you want to change.
 
-`plate issues` and `plate prs` read this file, and both take `--config PATH` to
-point at another one and `--config-path` to print the location they resolved;
-`plate retro` has no config-driven behaviour and reads no config.
+`plate issues` reads this file on every view; `plate prs` reads it only to
+resolve `--owner` aliases. Both take `--config PATH` to point at another file
+and `--config-path` to print the location they resolved; `plate retro` has no
+config-driven behaviour and reads no config.
 
 ## Development
 
