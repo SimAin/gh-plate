@@ -20,8 +20,11 @@ panel to live in, [gh-dash](https://github.com/dlvhdr/gh-dash) is that tool;
 
 - Python 3.11 or newer.
 - The [GitHub CLI](https://cli.github.com) (`gh`), installed and authenticated
-  (`gh auth login`). `plate` shells out to `gh` for every query and holds no
-  credentials of its own.
+  (`gh auth login`). `plate` shells out to `gh` for every GitHub query and
+  holds no credentials of its own.
+- `git` on your PATH when you run inside a checkout — `plate` reads the
+  `origin` remote to work out which repository you mean. Not needed with
+  `--repo`, `--owner`, or `plate retro`, which need no checkout.
 - For `plate issues --sprint` only: the `read:project` scope
   (`gh auth refresh -s read:project`).
 
@@ -73,7 +76,8 @@ If run outside a git repository without `--repo`, it prints an actionable error.
 
 The open issues assigned to you, shown as a **tree**: each issue sits indented
 beneath its parent. An ancestor that *isn't* assigned to you is still shown,
-**dimmed** with a `·`, so a child never floats parentless. Groups are ordered
+**dimmed** with a `·`, so a child never floats parentless (ancestors are
+followed three levels up; a deeper tree loses its topmost ones). Groups are ordered
 **active-subtree first** — the cluster you're working in now rises as a whole
 unit (it floats by its most recently touched issue), while long-untouched
 clusters sink intact to the bottom.
@@ -464,7 +468,7 @@ and `plate.core` never imports a domain package back.
 | `plate/prs/github.py` | PR-domain GraphQL fetches (`fetch_prs_and_viewer`, `fetch_owner_prs`) + `gh api graphql --paginate` pagination, built on `plate.core.gh`. |
 | `plate/prs/render.py` | PR-domain presentation: `terminal_table`/`markdown_table`, `owner_table`/`owner_markdown`, `summary_line`, `symbol_key`/`owner_key`, built on `plate.core.render`. |
 | `plate/prs/cli.py` | The `prs` subcommand: flags, and `run()`/`_run_repo`/`_run_owner` dispatch (`--owner` selects the owner-wide view). |
-| `plate/retro/model.py` | Pure domain: events → per-day push groups, compare expansion → commit refs, the per-owner channel sections and window arithmetic. |
+| `plate/retro/model.py` | Pure domain: push events → one compare range per branch (`push_groups`), compare expansion → your commit refs, the per-owner channel sections and window arithmetic, plus the honesty notes. |
 | `plate/retro/github.py` | Retro-domain REST fetches (events feed, PR search, compare API), built on `plate.core.gh`. |
 | `plate/retro/render.py` | Retro-domain presentation: the per-owner day grid (`panel`) and its markdown table. |
 | `plate/retro/cli.py` | The `retro` subcommand: flags and `run()`. |
@@ -478,9 +482,13 @@ and `plate.core` never imports a domain package back.
 
 ## History
 
-`plate` absorbed two earlier single-purpose tools, `gh-issue-check`
-(`issue-check`) and `gh-pr-status` (`pr-check`), which are no longer
-maintained. The changelog records the transition.
+`plate` started life as `gh-issue-check` (the `issue-check` command); this
+repository is that project, renamed. A sibling tool, `gh-pr-status`
+(`pr-check`), was folded in as the `prs` view rather than maintained as a
+second near-identical CLI (see D8 in [`DECISIONS.md`](./DECISIONS.md)). Both
+old commands are gone — a hard switch, recorded in the
+[changelog](./CHANGELOG.md); the pre-rename tags are still in the history if
+you need the old CLI.
 
 ## Licence
 
