@@ -4,7 +4,7 @@ Pure rendering — takes the forest plus flags, returns a string; no I/O. Follow
 the inherited discipline: colour is rationed to *health* (the leading glyph and
 a stale Age); everything else is carried by *weight*. Hierarchy is shown by
 indentation — a node sits beneath its parent — so no breadcrumb glyph is needed.
-Un-owned context ancestors are dimmed whole. See ``spec.md`` / ``MVP.md``.
+Un-owned context ancestors are dimmed whole.
 
 Builds on :mod:`plate.core.render` for the domain-agnostic primitives (ANSI/
 width helpers, ``divider``); everything here is specific to the issue tree,

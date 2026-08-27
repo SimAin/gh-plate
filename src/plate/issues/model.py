@@ -9,7 +9,7 @@ shown beneath its parent. Ancestors that are *not* assigned to you are still
 materialised as context nodes (rendered dimmed) so a child never floats
 parentless. Ordering is *active-first by subtree* — a group sorts by the most
 recently touched issue anywhere beneath it, so the cluster you are working in
-now rises as a whole unit and stale clusters sink intact. See ``MVP.md``.
+now rises as a whole unit and stale clusters sink intact.
 
 Scope note: every *owned* node is assigned to you, hence always owned, so the
 full design's ``untriaged`` / ``backlog`` health states cannot occur here;
