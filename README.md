@@ -146,6 +146,8 @@ plate prs --stale-days 7
 plate prs --show-key
 plate prs --timeline          # per-PR activity strip (see below)
 plate prs --owner my-org      # every open PR across an owner (see below)
+plate prs --config-path       # where the config file is read from
+plate prs --config PATH       # read that config file instead
 ```
 
 If run outside a git repository without `--repo`, it prints an actionable error.
@@ -439,6 +441,10 @@ A recognised label is pulled to the front of the Labels cell and shown bright:
 `alert` = red, `warn` = gold, `info` = green; `hide` drops the label entirely.
 Matching is case-insensitive and supports `*` globs for prefixed schemes. Your
 file merges over the built-in default, so you only list what you want to change.
+
+`plate issues` and `plate prs` read this file, and both take `--config PATH` to
+point at another one and `--config-path` to print the location they resolved;
+`plate retro` has no config-driven behaviour and reads no config.
 
 ## Development
 

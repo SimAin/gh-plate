@@ -5,6 +5,7 @@ stubbed — same style as tests/test_cli.py.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -101,6 +102,34 @@ def test_owner_and_repo_are_mutually_exclusive(capsys) -> None:
         cli.parse_args(["prs", "--owner", "an-org", "--repo", "an-org/a-repo"])
     assert excinfo.value.code == 2
     assert "not allowed with" in capsys.readouterr().err
+
+
+# --- config (--config / --config-path) ---------------------------------------
+
+
+def test_config_path_flag_prints_explicit_config_and_exits_zero(capsys) -> None:
+    # Returns before any config load or gh call — nothing is stubbed here.
+    args = cli.parse_args(["prs", "--config-path", "--config", "/tmp/plate.json"])
+    assert prs_cli.run(args) == 0
+    assert capsys.readouterr().out.strip() == "/tmp/plate.json"
+
+
+def test_config_path_flag_defaults_to_resolved_location(monkeypatch, capsys) -> None:
+    from plate.core import config
+
+    monkeypatch.setattr(config, "config_path", lambda: "/somewhere/config.json")
+    assert prs_cli.run(cli.parse_args(["prs", "--config-path"])) == 0
+    assert capsys.readouterr().out.strip() == "/somewhere/config.json"
+
+
+def test_config_file_supplies_owner_alias(monkeypatch, tmp_path, capsys) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"owners": {"work": "company-org"}}), encoding="utf-8")
+    calls = _stub_owner(monkeypatch, prs=[_owner_pr(1)], total=1, patch_config=False)
+    args = cli.parse_args(["prs", "--owner", "work", "--config", str(path)])
+    assert prs_cli.run(args) == 0
+    assert calls["owner"] == "company-org"
+    assert "work → company-org" in capsys.readouterr().out
 
 
 # --- run() ---------------------------------------------------------------
@@ -257,12 +286,20 @@ def _stub_owner(
     cfg: Any = None,
     owner_type: str = "organization",
     login: str = "me",
+    patch_config: bool = True,
 ) -> dict[str, Any]:
-    """Wire the owner path's I/O to in-memory stubs; record fetch arguments."""
+    """Wire the owner path's I/O to in-memory stubs; record fetch arguments.
+
+    ``patch_config=False`` leaves the real loader in place, for the tests that
+    need --config to actually read a file.
+    """
     from plate.core import config, gh
 
     calls: dict[str, Any] = {}
-    monkeypatch.setattr(config, "load_config", lambda *a, **k: cfg or config.Config())
+    if patch_config:
+        monkeypatch.setattr(
+            config, "load_config", lambda *a, **k: cfg or config.Config()
+        )
     monkeypatch.setattr(gh, "current_login", lambda: login)
     monkeypatch.setattr(gh, "current_repo", _boom_current_repo)
     monkeypatch.setattr(gh, "resolve_owner_type", lambda owner: owner_type)
