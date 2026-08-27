@@ -8,8 +8,8 @@ dist/
 build/
 *.egg-info/
 
-# Local Claude Code settings — machine-specific absolute paths
-.claude/settings.local.json
+# Local agent settings and worktrees
+.claude/
 
 # Coverage artefacts
 .coverage
