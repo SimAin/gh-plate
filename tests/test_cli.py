@@ -30,7 +30,9 @@ def test_bare_plate_prints_help_and_hint(capsys) -> None:
     out = capsys.readouterr().out
     assert "plate issues" in out
     assert "plate prs" in out
+    assert "plate retro" in out
     assert "Hint:" in out
+    assert all(len(line) <= 120 for line in out.splitlines())  # hint is wrapped
 
 
 def test_limit_zero_is_rejected(capsys) -> None:

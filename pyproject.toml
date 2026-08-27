@@ -1,5 +1,7 @@
 [project]
-name = "plate"
+# Distribution is gh-plate (PyPI "plate" is taken); the import package and the
+# command are both still "plate".
+name = "gh-plate"
 dynamic = ["version"]
 description = "Compact terminal status tables for your GitHub issues, pull requests, and activity."
 readme = "README.md"
@@ -7,12 +9,32 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = []
+authors = [{ name = "Simon Ainslie" }]
+keywords = ["github", "gh", "cli", "terminal", "issues", "pull-requests", "productivity"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development",
+  "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/SimAin/gh-plate"
+Repository = "https://github.com/SimAin/gh-plate"
+Changelog = "https://github.com/SimAin/gh-plate/blob/main/CHANGELOG.md"
+Issues = "https://github.com/SimAin/gh-plate/issues"
 
 [project.scripts]
 plate = "plate.cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]  # PEP 639 license metadata
 build-backend = "hatchling.build"
 
 # Single source of truth for the version: __version__ in the package __init__.

@@ -14,11 +14,13 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import textwrap
 from collections.abc import Callable
 from typing import TextIO
 
 from . import __version__
 from .core.gh import PlateError
+from .core.render import terminal_width
 from .issues import cli as issues_cli
 from .prs import cli as prs_cli
 from .retro import cli as retro_cli
@@ -73,12 +75,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     if args.command is None:
-        # Bare `plate`: show the top-level help and point at both views.
+        # Bare `plate`: show the top-level help and point at the views.
         parser.print_help()
-        print(
-            "\nHint: run `plate issues` to see the issues assigned to you, or "
-            "`plate prs` to see open pull requests."
+        hint = (
+            "Hint: run `plate issues` to see the issues assigned to you, "
+            "`plate prs` to see open pull requests, or `plate retro` for a "
+            "retrospective of your own activity."
         )
+        print("\n" + textwrap.fill(hint, width=terminal_width() - 2))
         return 0
     try:
         return _COMMANDS[args.command](args)
