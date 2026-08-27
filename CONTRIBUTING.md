@@ -37,7 +37,9 @@ uv run mypy                # strict type-check of src/
 
 Tests never touch the network: they monkeypatch the `gh` boundary
 (`plate.core.gh.run_command`) or a domain's `fetch_*` function. Keep it that
-way — a new test that needs a real token will be asked to change.
+way — a new test that needs a real token will be asked to change. An autouse
+fixture in `tests/conftest.py` enforces it: a test that reaches the real
+subprocess call fails with "tests must not shell out".
 
 ## Conventions
 
