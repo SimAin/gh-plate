@@ -120,6 +120,8 @@ In `--format markdown` the marker carries the PR number and state word
 The other columns carry the detail (for your own issues; blank on context rows):
 
 - **Age** — time since last update (`3d`, `4w`, `5mo`, `2y`), rose once stale.
+  It counts whole elapsed days, not calendar days, so an update made late
+  yesterday can still read `0d`.
 - **Labels** — the raw label set, dimmed, `:emoji:` shortcodes stripped. Whole
   labels are packed into the column with a `+N` count for any that don't fit
   (e.g. `security +1`), so it stays a clean context indicator. `--format
@@ -179,7 +181,8 @@ reserved for what those columns don't cover.
 The remaining columns carry the detail:
 
 - **Age** — time since the PR was opened (e.g. `3d`, `4w`) — total time in
-  flight. Context only, always dimmed.
+  flight. Context only, always dimmed. Age and **Last** count whole elapsed
+  days, not calendar days, so a move made late yesterday can still read `0d`.
 - **Last** — time since the last *human* move (a commit, review, or comment;
   bot activity never counts). Its weight answers "whose move is next?": full
   weight means the other side moved last and the days are **your** lag (on
@@ -199,7 +202,9 @@ Settled PRs in "the rest" are dimmed so your attention lands on what's live.
 ### The activity strip (`plate prs --timeline`)
 
 `--timeline` adds a sub-line under each row: the last 28 days of human
-activity, one cell per day, rightmost = today.
+activity, one cell per day, rightmost = today. Cells are UTC calendar days, so
+near midnight an event can land one cell from where your local calendar puts
+it.
 
 ```
 •  #81   feat: lag-days columns …   me    1w    2d  changes req  ✓    5
@@ -285,7 +290,8 @@ Owners appear most active first. Columns are days (weekday ruler, weekends
 dimmed, today bold, rightmost = today), digits are counts, `Σ` is the window
 total, and each row ends with the literal answer to "when did I last…?". The
 one tint is the gold nudge on a reviews row that has been quiet for two days
-or more.
+or more. Days are UTC calendar days, so near midnight a count can land on a
+different day from your local calendar.
 
 `closed` means "left the plate" — merged and closed-without-merge count
 alike. The `opened`/`closed` pair compares **flow rates**, it doesn't track
