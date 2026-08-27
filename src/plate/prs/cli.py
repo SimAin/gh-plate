@@ -4,7 +4,8 @@ repository.
 Thin wiring layer: parse the ``prs`` flags, ask :mod:`plate.prs.github` for
 data, hand it to :mod:`plate.prs.model` to normalize and :mod:`plate.prs.render`
 to format. Shared I/O (repo resolution) comes from :mod:`plate.core.gh`; the
-JSON config from :mod:`plate.core.config`. All environment failures arrive as
+JSON config arrives already loaded from :func:`plate.cli.main`. All
+environment failures arrive as
 :class:`~plate.core.gh.PlateError` and :func:`plate.cli.main` turns them into a
 clean stderr message with a non-zero exit.
 
@@ -99,11 +100,7 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     _add_prs_flags(prs)
 
 
-def run(args: argparse.Namespace) -> int:
-    if args.config_path:
-        print(args.config or config.config_path())
-        return 0
-
+def run(args: argparse.Namespace, cfg: config.Config) -> int:
     if args.mine and not args.owner:
         raise PlateError(
             "--mine only applies with --owner. The repo view already shows every "
@@ -119,7 +116,7 @@ def run(args: argparse.Namespace) -> int:
     if args.owner:
         # The owner view is not tied to a checkout, so it must not require a git
         # repo — never call gh.current_repo() on this path (#54).
-        return _run_owner(args)
+        return _run_owner(args, cfg)
 
     repo = args.repo or gh.current_repo()
     return _run_repo(args, repo)
@@ -173,9 +170,7 @@ def _run_repo(args: argparse.Namespace, repo: str) -> int:
     return 0
 
 
-def _run_owner(args: argparse.Namespace) -> int:
-    cfg = config.load_config(args.config)
-
+def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
     login = gh.current_login()
     if login is None:
         raise PlateError(

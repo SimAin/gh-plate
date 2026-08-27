@@ -10,19 +10,6 @@ from plate.core import config
 from plate.core.gh import PlateError
 
 
-@pytest.fixture(autouse=True)
-def _isolated_config_env(tmp_path, monkeypatch):
-    """Give every test a clean, isolated $HOME with no config env vars set.
-
-    config_path() is pure, but its default still depends on $HOME/
-    $XDG_CONFIG_HOME, which would otherwise leak in from whoever/wherever the
-    tests run.
-    """
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    monkeypatch.delenv("PLATE_CONFIG", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
-
-
 def test_defaults_when_no_file(tmp_path) -> None:
     missing = tmp_path / "nope.json"
     cfg = config.load_config(str(missing))

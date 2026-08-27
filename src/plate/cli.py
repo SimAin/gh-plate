@@ -1,12 +1,12 @@
 """plate — a status table for GitHub work.
 
-Top-level wiring only: build the argument parser, dispatch to a subcommand,
-and turn a :class:`~plate.core.gh.PlateError` into a clean stderr message with
-a non-zero exit. This module knows nothing about issues, sprints, owners, PRs,
-or retros — that logic lives in each domain's own ``cli`` module (see
-:mod:`plate.issues.cli`, :mod:`plate.prs.cli`, :mod:`plate.retro.cli`), which
-this module wires up via :func:`add_parser` and :func:`run`. This is the one
-place the domains may be named.
+Top-level wiring only: build the argument parser, load the config once, hand
+both to a subcommand, and turn a :class:`~plate.core.gh.PlateError` into a
+clean stderr message with a non-zero exit. This module knows nothing about
+issues, sprints, owners, PRs, or retros — that logic lives in each domain's own
+``cli`` module (see :mod:`plate.issues.cli`, :mod:`plate.prs.cli`,
+:mod:`plate.retro.cli`), which this module wires up via :func:`add_parser` and
+:func:`run`. This is the one place the domains may be named.
 """
 
 from __future__ import annotations
@@ -19,13 +19,14 @@ from collections.abc import Callable
 from typing import TextIO
 
 from . import __version__
+from .core import config
 from .core.gh import PlateError
 from .core.render import terminal_width
 from .issues import cli as issues_cli
 from .prs import cli as prs_cli
 from .retro import cli as retro_cli
 
-_COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
+_COMMANDS: dict[str, Callable[[argparse.Namespace, config.Config], int]] = {
     "issues": issues_cli.run,
     "prs": prs_cli.run,
     "retro": retro_cli.run,
@@ -84,8 +85,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         print("\n" + textwrap.fill(hint, width=terminal_width() - 2))
         return 0
+    if getattr(args, "config_path", False):
+        print(args.config or config.config_path())
+        return 0
     try:
-        return _COMMANDS[args.command](args)
+        # retro declares no --config, so don't read a file it would ignore.
+        cfg = (
+            config.load_config(args.config)
+            if hasattr(args, "config")
+            else config.Config()
+        )
+        return _COMMANDS[args.command](args, cfg)
     except PlateError as exc:
         print(str(exc), file=sys.stderr)
         return 1

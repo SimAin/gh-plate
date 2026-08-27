@@ -11,7 +11,7 @@ import argparse
 import sys
 from datetime import UTC, datetime
 
-from plate.core import flags, gh
+from plate.core import config, flags, gh
 from plate.core.gh import PlateError
 from plate.core.render import color_enabled
 
@@ -61,7 +61,9 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     )
 
 
-def run(args: argparse.Namespace) -> int:
+def run(args: argparse.Namespace, _cfg: config.Config) -> int:
+    # No config-driven behaviour here; the parameter keeps the runner signature
+    # uniform for plate.cli's registry.
     login = gh.current_login()
     if login is None:
         raise PlateError(
