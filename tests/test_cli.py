@@ -534,3 +534,25 @@ def test_tolerate_unencodable_ignores_streams_without_reconfigure() -> None:
     import io
 
     cli.tolerate_unencodable(io.StringIO())  # no reconfigure(); must not raise
+
+
+def _install_command(monkeypatch, exc: BaseException) -> None:
+    def boom(args: Any) -> int:
+        raise exc
+
+    monkeypatch.setitem(cli._COMMANDS, "issues", boom)
+
+
+def test_keyboard_interrupt_exits_130_without_traceback(monkeypatch, capsys) -> None:
+    _install_command(monkeypatch, KeyboardInterrupt())
+    assert cli.main(["issues"]) == 130
+    captured = capsys.readouterr()
+    assert "Interrupted." in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_broken_pipe_exits_141_quietly(monkeypatch, capsys) -> None:
+    _install_command(monkeypatch, BrokenPipeError())
+    assert cli.main(["issues"]) == 141
+    captured = capsys.readouterr()
+    assert captured.err == ""

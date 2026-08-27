@@ -12,6 +12,7 @@ place the domains may be named.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Callable
 from typing import TextIO
@@ -80,6 +81,22 @@ def main(argv: list[str] | None = None) -> int:
     except PlateError as exc:
         print(str(exc), file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        return 130
+    except BrokenPipeError:
+        # Reader (e.g. `| head`) went away. Point stdout at devnull so the
+        # interpreter's exit-time flush doesn't raise a second time.
+        _silence_stdout()
+        return 141
+
+
+def _silence_stdout() -> None:
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+    except (OSError, ValueError):
+        pass
 
 
 if __name__ == "__main__":
