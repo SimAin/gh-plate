@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from plate.core.render import compact_text
+from plate.core.text import compact_text, parse_timestamp
 
 # ``(repo, number)`` — the only identity that is unique across repos. An issue
 # *number* alone is only unique within its own repo, so every index/forest in
@@ -119,15 +119,6 @@ class TreeNode:
     row: IssueRow
     depth: int
     children: list[TreeNode] = field(default_factory=list)
-
-
-def parse_timestamp(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def age_in_days(updated_at: Any, now: datetime | None) -> int | None:

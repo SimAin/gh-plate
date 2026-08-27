@@ -22,7 +22,7 @@ import argparse
 import sys
 from datetime import UTC, datetime
 
-from plate.core import config, gh
+from plate.core import config, gh, owner
 from plate.core.gh import PlateError
 from plate.core.render import color_enabled
 
@@ -182,9 +182,6 @@ def _run_repo(args: argparse.Namespace, repo: str) -> int:
 
 
 def _run_owner(args: argparse.Namespace) -> int:
-    # Parallel to plate.issues.cli._run_owner (not imported — the domains stay
-    # independent, see DECISIONS.md D8): resolve any alias, resolve the owner
-    # type (which doubles as validation), fetch, group by repo, render.
     cfg = config.load_config()
 
     login = gh.current_login()
@@ -195,27 +192,11 @@ def _run_owner(args: argparse.Namespace) -> int:
             "without it."
         )
 
-    resolved = cfg.resolve_owner(args.owner)
-    # Show the alias mapping only when one actually fired (the resolver folds
-    # case, so compare after resolution); a literal owner shows just its name.
-    alias_fired = resolved != args.owner
-    display = f"{args.owner} → {resolved}" if alias_fired else args.owner
-
-    try:
-        owner_type = gh.resolve_owner_type(resolved)
-    except PlateError as exc:
-        # An unknown alias falls through resolve_owner as a literal, so a typo'd
-        # alias surfaces here as an unknown owner. If aliases are configured,
-        # list them so the user can spot the one they meant.
-        if cfg.owners:
-            aliases = ", ".join(
-                f"{alias} → {owner}" for alias, owner in cfg.owners.items()
-            )
-            raise PlateError(f"{exc}\nConfigured aliases: {aliases}") from exc
-        raise
+    target = owner.resolve_owner(args.owner, cfg)
+    display = target.display
 
     prs, total = github.fetch_owner_prs(
-        resolved, owner_type, login, args.limit, mine=args.mine
+        target.name, target.owner_type, login, args.limit, mine=args.mine
     )
     if not prs:
         if args.mine:
@@ -228,7 +209,7 @@ def _run_owner(args: argparse.Namespace) -> int:
     sections = group_by_repo(rows)
 
     if args.format == "markdown":
-        if alias_fired:
+        if target.alias_fired:
             print(f"*{display}*")
             print()
         print(render.owner_markdown(sections))
@@ -237,24 +218,15 @@ def _run_owner(args: argparse.Namespace) -> int:
         if args.show_key:
             print(render.owner_key(use_color))
             print()
-        if alias_fired:
+        if target.alias_fired:
             print(render.dim(display, use_color))
         print(render.summary_line(summary_counts(rows)))
         print()
         print(render.owner_table(sections, use_color, use_links=sys.stdout.isatty()))
 
-    if len(prs) < total:
-        if len(prs) == args.limit:
-            print(
-                f"\nNote: showing {len(prs)} of {total} open PRs for "
-                f"{display} (--limit {args.limit}).",
-                file=sys.stderr,
-            )
-        else:
-            print(
-                "\nNote: GitHub search returns at most 1000 results per query; "
-                f"showing {len(prs)} of {total} open PRs for {display}. "
-                "Use --mine or --repo to narrow.",
-                file=sys.stderr,
-            )
+    note = owner.listing_truncation_note(
+        "open PRs", display, len(prs), total, args.limit
+    )
+    if note:
+        print(note, file=sys.stderr)
     return 0

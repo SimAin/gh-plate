@@ -25,14 +25,16 @@ def test_version_flag_prints_version_and_exits(capsys) -> None:
     assert __version__ in capsys.readouterr().out
 
 
-def test_bare_plate_prints_help_and_hint(capsys) -> None:
+def test_bare_plate_prints_help_and_hint(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli, "terminal_width", lambda: 80)
     assert cli.main([]) == 0
     out = capsys.readouterr().out
     assert "plate issues" in out
     assert "plate prs" in out
     assert "plate retro" in out
-    assert "Hint:" in out
-    assert all(len(line) <= 120 for line in out.splitlines())  # hint is wrapped
+    hint_lines = out[out.index("Hint:") :].splitlines()
+    assert len(hint_lines) >= 2  # wrapped to the (patched) terminal width
+    assert all(len(line) <= 78 for line in hint_lines)
 
 
 def test_limit_zero_is_rejected(capsys) -> None:

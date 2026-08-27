@@ -37,7 +37,10 @@ uv run mypy                # strict type-check of src/
 
 Tests never touch the network: they monkeypatch the `gh` boundary
 (`plate.core.gh.run_command`) or a domain's `fetch_*` function. Keep it that
-way — a new test that needs a real token will be asked to change.
+way — a new test that needs a real token will be asked to change. An autouse
+fixture in `tests/conftest.py` enforces it: it refuses the `gh` boundary's
+`subprocess.run`, so a test that reaches it unpatched fails with "tests must
+not shell out".
 
 ## Conventions
 
@@ -70,6 +73,8 @@ a domain package back.
 | `plate/cli.py` | Top-level wiring only: builds the parser, dispatches to a subcommand via a command→runner registry, turns a `PlateError` into a clean exit. Knows nothing about issues, sprints, owners, PRs, or retros — this is the one place the domains may be named. |
 | `plate/core/gh.py` | The only impure module: `git`/`gh` shelling (`run_command`), repo + login detection, owner-type resolution. Failures raise `PlateError`. Shared by every domain. |
 | `plate/core/render.py` | Domain-agnostic presentation primitives: ANSI/width helpers, `format_cell`, `format_age`, `hyperlink`, `divider`, `color_enabled`. |
+| `plate/core/text.py` | Data cleaning on the way in from a `gh` payload: `compact_text` (one safe line from untrusted text) and `parse_timestamp`. Shared by every domain's `model`. |
+| `plate/core/owner.py` | The owner-wide views' shared plumbing: `resolve_owner` (alias table, then GitHub's owner type) and `listing_truncation_note`. |
 | `plate/core/config.py` | The JSON config: special-label styles, the per-repo `repos` → project-board mapping, and the `owners` alias table. |
 | `plate/issues/model.py` | Pure domain: raw JSON → `IssueRow` index → sorted forest (`build_index`/`build_forest`); the sprint buckets (`build_sprint_view`); health state, progress. |
 | `plate/issues/github.py` | Issue-domain GraphQL fetches (`fetch_assigned_issues`, `fetch_owner_issues`, `fetch_sprint_items`) + pagination + board-field validation, built on `plate.core.gh`. |

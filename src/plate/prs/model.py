@@ -1,12 +1,14 @@
 """Domain model: raw ``gh`` GraphQL PR nodes -> a list of :class:`PrRow`s.
 
 Pure functions only — no subprocess, no I/O, no printing, and no rendering
-(that is the render layer's job). This is the PR-view counterpart to
-:mod:`plate.issues.model`: it takes the GraphQL PR payload shape produced by
-the fetch layer and normalizes each node into an immutable :class:`PrRow`,
-resolving the derived signals the views care about — bot authorship, the
-review/CI state mapping, conflict/staleness flags, the single headline
-:func:`pr_state`, and the yours / to-review / the-rest grouping.
+(that is the render layer's job; width-aware truncation is borrowed from
+:mod:`plate.core.render` — it is text maths, not output). This is the
+PR-view counterpart to :mod:`plate.issues.model`: it takes the GraphQL PR
+payload shape produced by the fetch layer and normalizes each node into an
+immutable :class:`PrRow`, resolving the derived signals the views care
+about — bot authorship, the review/CI state mapping, conflict/staleness
+flags, the single headline :func:`pr_state`, and the yours / to-review /
+the-rest grouping.
 
 Ported from the standalone ``gh-pr-status`` tool during the absorption epic
 (#50); the boundary test enforces that this module imports only stdlib and
@@ -20,7 +22,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from plate.core.render import compact_text
+from plate.core.render import truncate
+from plate.core.text import compact_text, parse_timestamp
 
 DEFAULT_STALE_DAYS = 14
 TIMELINE_DAYS = 28
@@ -125,15 +128,12 @@ def connection_nodes(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)]
 
 
-def truncate(value: str, max_length: int) -> str:
-    if len(value) <= max_length:
-        return value
-    if max_length <= 3:
-        return value[:max_length]
-    return f"{value[: max_length - 3]}..."
-
-
 def clean_title(title: Any, max_length: int = 50) -> str:
+    """A one-line title cut to ``max_length`` display columns.
+
+    Columns, not characters: a CJK or emoji title measures two per glyph, so
+    the row it lands in stays inside its budget.
+    """
     if not isinstance(title, str):
         return ""
     return truncate(compact_text(title), max_length)
@@ -213,15 +213,6 @@ def bot_name(pr: dict[str, Any]) -> str | None:
     if name.endswith("[bot]"):
         name = name[: -len("[bot]")]
     return name
-
-
-def parse_timestamp(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def _days_since(value: Any, now: datetime | None) -> int | None:
