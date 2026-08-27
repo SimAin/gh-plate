@@ -251,13 +251,15 @@ def test_fetch_retries_a_transient_failure(monkeypatch) -> None:
 def test_fetch_persistent_transient_failure_raises(monkeypatch) -> None:
     fake_run = _flaky_run(99, "")
     monkeypatch.setattr(gh, "run_command", fake_run)
-    monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
+    sleeps: list[float] = []
+    monkeypatch.setattr(gh.time, "sleep", sleeps.append)
 
     with pytest.raises(PlateError) as excinfo:
         github.fetch_events("simon")
 
     assert "HTTP 502" in str(excinfo.value)
     assert len(fake_run.calls) == gh.MAX_ATTEMPTS
+    assert sleeps == [1.0, 2.0]  # backoff grows; nothing after the last attempt
 
 
 def test_fetch_non_transient_failure_does_not_retry(monkeypatch) -> None:
@@ -288,7 +290,43 @@ def test_fetch_paints_progress_on_a_tty(monkeypatch) -> None:
 
     github.fetch_events("simon")
 
-    assert "Fetching your GitHub events (page 1/3)…" in stderr.getvalue()
+    assert "Fetching your GitHub events…" in stderr.getvalue()
+
+
+def test_fetch_paints_retry_progress_on_a_tty(monkeypatch) -> None:
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    fake_run = _flaky_run(1, json.dumps([review_event()]))
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
+
+    github.fetch_events("simon")
+
+    output = stderr.getvalue()
+    assert "GitHub answered HTTP 502 — retrying (attempt 2/3)…" in output
+    assert output.startswith("\r\x1b[2K")
+
+
+def test_fetch_compares_paints_branch_progress_on_a_tty(monkeypatch) -> None:
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, stdout=compare_payload(), stderr="")
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    github.fetch_compares([("acme/widget", "a" * 8, "b" * 8)])
+    assert "Expanding pushes on 1 branch…" in stderr.getvalue()
+
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    github.fetch_compares(
+        [
+            ("acme/widget", "a" * 8, "b" * 8),
+            ("acme/other", "c" * 8, "d" * 8),
+        ]
+    )
+    assert "Expanding pushes on 2 branches…" in stderr.getvalue()
 
 
 def test_fetch_is_silent_when_stderr_is_not_a_tty(monkeypatch) -> None:

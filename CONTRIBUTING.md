@@ -68,7 +68,7 @@ a domain package back.
 | Module | Responsibility |
 | --- | --- |
 | `plate/cli.py` | Top-level wiring only: builds the parser, dispatches to a subcommand via a command→runner registry, turns a `PlateError` into a clean exit. Knows nothing about issues, sprints, owners, PRs, or retros — this is the one place the domains may be named. |
-| `plate/core/gh.py` | The only impure module: `git`/`gh` shelling (`run_command`), repo + login detection, owner-type resolution. Failures raise `PlateError`. Shared by every domain. |
+| `plate/core/gh.py` | The only impure module: `git`/`gh` shelling (`run_command`), repo + login detection, owner-type resolution. Failures raise `PlateError`. Shared by every domain. Also the shared transient-5xx retry policy (`run_gh_with_retry`) and the stderr progress line (`progress`/`progress_clear`). |
 | `plate/core/render.py` | Domain-agnostic presentation primitives: ANSI/width helpers, `format_cell`, `format_age`, `hyperlink`, `divider`, `color_enabled`. |
 | `plate/core/config.py` | The JSON config: special-label styles, the per-repo `repos` → project-board mapping, and the `owners` alias table. |
 | `plate/issues/model.py` | Pure domain: raw JSON → `IssueRow` index → sorted forest (`build_index`/`build_forest`); the sprint buckets (`build_sprint_view`); health state, progress. |

@@ -73,7 +73,8 @@ def fetch_events(login: str) -> list[dict[str, Any]]:
     """The viewer's recent public+private activity events, newest first."""
     events: list[dict[str, Any]] = []
     for page in range(1, EVENTS_MAX_PAGES + 1):
-        gh.progress(f"Fetching your GitHub events (page {page}/{EVENTS_MAX_PAGES})…")
+        suffix = f" (page {page})" if page > 1 else ""
+        gh.progress(f"Fetching your GitHub events{suffix}…")
         batch = _fetch_json(
             f"users/{login}/events?per_page={EVENTS_PER_PAGE}&page={page}"
         )
