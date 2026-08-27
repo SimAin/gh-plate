@@ -1,5 +1,5 @@
 """Domain-agnostic presentation primitives shared by every plate view: ANSI
-colour/style helpers, width-aware cell formatting, hyperlinks. Pure — no I/O.
+colour/style helpers, width-aware cell formatting, hyperlinks, terminal probes.
 
 Every domain package's renderer (see :mod:`plate.issues.render`, and later a
 ``plate.prs.render``) builds its tables and trees on top of these; nothing
@@ -8,8 +8,10 @@ here knows about issues, sprints, PRs, or any other domain concept.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import sys
 import unicodedata
 
 # xterm-256 soft tints — muted hues so a coloured glyph reads as signal, not noise.
@@ -129,6 +131,20 @@ def escape_markdown_cell(value: str) -> str:
 
 def terminal_width() -> int:
     return shutil.get_terminal_size(fallback=(120, 24)).columns
+
+
+def color_enabled(mode: str) -> bool:
+    """Resolve a --color mode. An explicit always/never wins; under auto,
+    NO_COLOR disables, FORCE_COLOR enables, otherwise colour iff stdout is a tty."""
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    return sys.stdout.isatty()
 
 
 def divider(label: str, width: int, use_color: bool) -> str:

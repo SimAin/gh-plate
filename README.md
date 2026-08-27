@@ -52,6 +52,9 @@ plate issues --owner my-org      # every open issue across an owner (see below)
 
 If run outside a git repository without `--repo`, it prints an actionable error.
 
+`--color auto` (the default) honours [`NO_COLOR`](https://no-color.org) and
+`FORCE_COLOR`; `--color always`/`never` override both.
+
 ### How to read the table
 
 The open issues assigned to you, shown as a **tree**: each issue sits indented

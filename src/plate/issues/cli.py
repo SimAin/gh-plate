@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 
 from plate.core import config, gh
 from plate.core.gh import PlateError
+from plate.core.render import color_enabled
 
 from . import github, render
 from .model import build_forest, build_index, build_sprint_view, group_by_repo
@@ -68,7 +69,8 @@ def _add_issues_flags(parser: argparse.ArgumentParser) -> None:
         "--color",
         choices=("auto", "always", "never"),
         default="auto",
-        help="Colour terminal output. Defaults to auto.",
+        help="Colour terminal output. Defaults to auto, which honours NO_COLOR "
+        "and FORCE_COLOR and otherwise colours only a terminal.",
     )
     parser.add_argument(
         "--stale-days",
@@ -112,10 +114,6 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "across every repository of an owner with --owner.",
     )
     _add_issues_flags(issues)
-
-
-def _use_color(args: argparse.Namespace) -> bool:
-    return args.color == "always" or (args.color == "auto" and sys.stdout.isatty())
 
 
 def _require_login(viewer: str | None) -> str:
@@ -178,7 +176,7 @@ def _run_yours(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
     if args.format == "markdown":
         print(render.markdown_tree(forest, cfg.style_for))
     else:
-        use_color = _use_color(args)
+        use_color = color_enabled(args.color)
         if args.show_key:
             print(render.symbol_key(use_color))
             print()
@@ -240,7 +238,7 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
             print()
         print(render.owner_markdown(sections, cfg.style_for))
     else:
-        use_color = _use_color(args)
+        use_color = color_enabled(args.color)
         if args.show_key:
             print(render.owner_key(use_color))
             print()
@@ -311,7 +309,7 @@ def _run_sprint(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
     if args.format == "markdown":
         print(render.sprint_markdown(view, cfg.style_for))
     else:
-        use_color = _use_color(args)
+        use_color = color_enabled(args.color)
         if args.show_key:
             print(render.sprint_key(use_color))
             print()

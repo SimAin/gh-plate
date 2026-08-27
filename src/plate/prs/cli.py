@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 
 from plate.core import config, gh
 from plate.core.gh import PlateError
+from plate.core.render import color_enabled
 
 from . import github, render
 from .model import group_by_repo, normalize_rows, summary_counts
@@ -72,7 +73,8 @@ def _add_prs_flags(parser: argparse.ArgumentParser) -> None:
         "--color",
         choices=("auto", "always", "never"),
         default="auto",
-        help="Colour terminal output. Defaults to auto.",
+        help="Colour terminal output. Defaults to auto, which honours NO_COLOR "
+        "and FORCE_COLOR and otherwise colours only a terminal.",
     )
     parser.add_argument(
         "--stale-days",
@@ -107,10 +109,6 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "or across every repository of an owner with --owner.",
     )
     _add_prs_flags(prs)
-
-
-def _use_color(args: argparse.Namespace) -> bool:
-    return args.color == "always" or (args.color == "auto" and sys.stdout.isatty())
 
 
 def run(args: argparse.Namespace) -> int:
@@ -151,7 +149,7 @@ def _run_repo(args: argparse.Namespace, repo: str) -> int:
     if args.format == "markdown":
         print(render.markdown_table(rows))
     else:
-        use_color = _use_color(args)
+        use_color = color_enabled(args.color)
         if args.show_key:
             print(render.symbol_key(use_color, show_timeline=timeline))
             print()
@@ -235,7 +233,7 @@ def _run_owner(args: argparse.Namespace) -> int:
             print()
         print(render.owner_markdown(sections))
     else:
-        use_color = _use_color(args)
+        use_color = color_enabled(args.color)
         if args.show_key:
             print(render.owner_key(use_color))
             print()

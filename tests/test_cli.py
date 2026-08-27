@@ -556,3 +556,37 @@ def test_broken_pipe_exits_141_quietly(monkeypatch, capsys) -> None:
     assert cli.main(["issues"]) == 141
     captured = capsys.readouterr()
     assert captured.err == ""
+
+
+class _Tty:
+    def __init__(self, tty: bool) -> None:
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+@pytest.mark.parametrize(
+    ("mode", "env", "tty", "expected"),
+    [
+        ("always", {}, False, True),
+        ("never", {}, True, False),
+        ("auto", {}, True, True),
+        ("auto", {}, False, False),
+        ("auto", {"NO_COLOR": "1"}, True, False),
+        ("auto", {"NO_COLOR": ""}, True, True),
+        ("auto", {"FORCE_COLOR": "1"}, False, True),
+        ("auto", {"NO_COLOR": "1", "FORCE_COLOR": "1"}, True, False),
+        ("always", {"NO_COLOR": "1"}, False, True),
+        ("never", {"FORCE_COLOR": "1"}, True, False),
+    ],
+)
+def test_color_enabled_resolution(monkeypatch, mode, env, tty, expected) -> None:
+    from plate.core.render import color_enabled
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr("plate.core.render.sys.stdout", _Tty(tty))
+    assert color_enabled(mode) is expected
