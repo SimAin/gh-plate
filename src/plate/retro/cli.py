@@ -11,7 +11,7 @@ import argparse
 import sys
 from datetime import UTC, datetime
 
-from plate.core import gh
+from plate.core import flags, gh
 from plate.core.gh import PlateError
 from plate.core.render import color_enabled
 
@@ -50,6 +50,7 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "included, "
         "split into one panel per repository owner so work and personal "
         "activity read separately. Needs no repository checkout.",
+        parents=[flags.output()],
     )
     retro.add_argument(
         "--days",
@@ -57,20 +58,6 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         default=DEFAULT_DAYS,
         help=f"Window size in days ({MIN_DAYS}-{MAX_DAYS}). "
         f"Defaults to {DEFAULT_DAYS}.",
-    )
-    retro.add_argument(
-        "--format",
-        choices=("terminal", "markdown"),
-        default="terminal",
-        help="Output format. Defaults to terminal.",
-    )
-    retro.add_argument(
-        "--color",
-        choices=("auto", "always", "never"),
-        default="auto",
-        help="Colour terminal output. Defaults to auto, which honours NO_COLOR "
-        "and FORCE_COLOR, skips colour under TERM=dumb, and otherwise colours "
-        "only a terminal.",
     )
 
 

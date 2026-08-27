@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import io
 import os
 import sys
@@ -72,6 +73,38 @@ def test_defaults_when_not_given() -> None:
     args = cli.parse_args(["issues"])
     assert args.limit == issues_cli.DEFAULT_LIMIT
     assert args.stale_days == issues_cli.DEFAULT_STALE_DAYS
+
+
+# --- shared flags (plate.core.flags) -----------------------------------------
+
+
+def _flag_names(subcommand: str) -> set[str]:
+    """Every option string the ``subcommand`` subparser accepts."""
+    subparsers = next(
+        action
+        for action in cli._build_parser()._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    parser = subparsers.choices[subcommand]
+    return {opt for action in parser._actions for opt in action.option_strings}
+
+
+def test_output_flags_are_mounted_on_every_subcommand() -> None:
+    for subcommand in ("issues", "prs", "retro"):
+        assert {"--format", "--color"} <= _flag_names(subcommand)
+
+
+def test_config_flags_are_mounted_only_where_the_config_is_read() -> None:
+    for subcommand in ("issues", "prs"):
+        assert {"--config", "--config-path"} <= _flag_names(subcommand)
+    assert not {"--config", "--config-path"} & _flag_names("retro")
+
+
+def test_retro_rejects_config_flag(capsys) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        cli.parse_args(["retro", "--config", "/tmp/plate.json"])
+    assert excinfo.value.code == 2
+    assert "--config" in capsys.readouterr().err
 
 
 def test_config_path_flag_prints_explicit_config_and_exits_zero(capsys) -> None:

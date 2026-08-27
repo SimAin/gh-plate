@@ -22,7 +22,7 @@ import argparse
 import sys
 from datetime import UTC, datetime
 
-from plate.core import config, gh, owner
+from plate.core import config, flags, gh, owner
 from plate.core.gh import PlateError
 from plate.core.render import color_enabled
 
@@ -64,20 +64,6 @@ def _add_prs_flags(parser: argparse.ArgumentParser) -> None:
         help=f"Maximum open PRs to fetch. Defaults to {DEFAULT_LIMIT}.",
     )
     parser.add_argument(
-        "--format",
-        choices=("terminal", "markdown"),
-        default="terminal",
-        help="Output format. Defaults to terminal.",
-    )
-    parser.add_argument(
-        "--color",
-        choices=("auto", "always", "never"),
-        default="auto",
-        help="Colour terminal output. Defaults to auto, which honours NO_COLOR "
-        "and FORCE_COLOR, skips colour under TERM=dumb, and otherwise colours "
-        "only a terminal.",
-    )
-    parser.add_argument(
         "--stale-days",
         type=_positive_int,
         default=DEFAULT_STALE_DAYS,
@@ -98,16 +84,6 @@ def _add_prs_flags(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Print a key explaining the symbols above the table.",
     )
-    parser.add_argument(
-        "--config",
-        help="Path to a JSON config file. Defaults to $PLATE_CONFIG or "
-        "~/.config/plate/config.json.",
-    )
-    parser.add_argument(
-        "--config-path",
-        action="store_true",
-        help="Print the resolved config file location and exit.",
-    )
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -118,6 +94,7 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "across every repository of an owner with --owner.",
         description="Status table for open GitHub pull requests in a repository, "
         "or across every repository of an owner with --owner.",
+        parents=[flags.output(), flags.config()],
     )
     _add_prs_flags(prs)
 
