@@ -53,6 +53,10 @@ line-length = 88
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# The golden snapshots are 120-column views: they cannot fit in 88.
+"tests/test_golden.py" = ["E501"]
+
 [tool.mypy]
 strict = true
 files = ["src"]
