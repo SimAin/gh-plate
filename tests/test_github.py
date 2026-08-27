@@ -677,7 +677,7 @@ def test_search_paginated_persistent_502_raises_actionable_error(
     assert "acme" in message
     assert "HTTP 502" in message
     assert "server-side" in message
-    assert len(fake_run.seen) == gh._MAX_ATTEMPTS  # type: ignore[attr-defined]
+    assert len(fake_run.seen) == gh.MAX_ATTEMPTS  # type: ignore[attr-defined]
 
 
 def test_search_paginated_non_transient_failure_does_not_retry(
@@ -781,7 +781,7 @@ def test_search_paginated_requests_only_what_limit_needs(
 
 
 class _TtyStderr(io.StringIO):
-    """A StringIO posing as a terminal, so ``gh._progress`` writes to it."""
+    """A StringIO posing as a terminal, so ``gh.progress`` writes to it."""
 
     def isatty(self) -> bool:
         return True

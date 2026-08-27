@@ -120,26 +120,27 @@ def resolve_owner_type(owner: str) -> str:
 
 # GitHub answers an over-expensive search page with a bare HTTP 502 (sometimes
 # 503/504): the query exceeded its server-side time budget. Per GitHub's own
-# guidance, retry and request fewer nodes — each page gets ``_MAX_ATTEMPTS``
+# guidance, retry and request fewer nodes — each page gets ``MAX_ATTEMPTS``
 # tries, halving the page size on every transient 5xx (100 → 50 → 25).
 _TRANSIENT_HTTP = re.compile(r"HTTP (50[234])")
 _MAX_PAGE_SIZE = 100
 _MIN_PAGE_SIZE = 25
-_MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 1.0
 
 
 # A self-overwriting stderr status line (``\r`` + erase-line), so a slow
-# multi-page search — especially one sleeping through 502 retries — doesn't
-# read as a hang. TTY-gated: pipes, redirects, and scripts see nothing.
-def _progress(message: str) -> None:
+# multi-page fetch — especially one sleeping through 502 retries — doesn't
+# read as a hang. Callers own the wording and must clear the line before
+# anything real prints. TTY-gated: pipes, redirects, and scripts see nothing.
+def progress(message: str) -> None:
     if not sys.stderr.isatty():
         return
     sys.stderr.write(f"\r\x1b[2K{message}")
     sys.stderr.flush()
 
 
-def _progress_clear() -> None:
+def progress_clear() -> None:
     if not sys.stderr.isatty():
         return
     sys.stderr.write("\r\x1b[2K")
@@ -181,7 +182,7 @@ def run_gh_with_retry(
         status = transient.group(1)
         if on_transient is not None:
             on_transient(status, attempt)
-        if attempt >= _MAX_ATTEMPTS:
+        if attempt >= MAX_ATTEMPTS:
             return GhAttempt(result, status, True, attempt)
         time.sleep(_RETRY_DELAY_SECONDS * attempt)
         attempt += 1
@@ -233,7 +234,7 @@ def search_paginated_with_viewer(
     pagination ever delivers — it is not only the true count clipped by
     ``limit``.
 
-    A transient stderr status line (see ``_progress``) shows fetch and retry
+    A transient stderr status line (see ``progress``) shows fetch and retry
     progress; the ``finally`` clears it on every exit, return or raise.
     """
     nodes: list[dict[str, Any]] = []
@@ -244,7 +245,7 @@ def search_paginated_with_viewer(
 
     def page_args() -> list[str]:
         fetched = f" {len(nodes)}/{min(total, limit)}" if nodes else ""
-        _progress(f"Fetching from GitHub for {error_context}…{fetched}")
+        progress(f"Fetching from GitHub for {error_context}…{fetched}")
         page_size = min(page_cap, limit - len(nodes))
         args = [
             "gh",
@@ -264,11 +265,11 @@ def search_paginated_with_viewer(
     def shrink_page(status: str, attempt: int) -> None:
         nonlocal page_cap
         page_cap = max(page_cap // 2, _MIN_PAGE_SIZE)
-        if attempt < _MAX_ATTEMPTS:
-            _progress(
+        if attempt < MAX_ATTEMPTS:
+            progress(
                 f"GitHub timed out (HTTP {status}) — retrying with "
                 f"page size {page_cap} "
-                f"(attempt {attempt + 1}/{_MAX_ATTEMPTS})…"
+                f"(attempt {attempt + 1}/{MAX_ATTEMPTS})…"
             )
 
     try:
@@ -277,7 +278,7 @@ def search_paginated_with_viewer(
             if attempt.exhausted:
                 raise PlateError(
                     f"gh search failed for {error_context}: GitHub answered "
-                    f"HTTP {attempt.status} on {_MAX_ATTEMPTS} attempts "
+                    f"HTTP {attempt.status} on {MAX_ATTEMPTS} attempts "
                     f"(page size reduced to {page_cap}).\n"
                     "That status is GitHub timing the search out server-side "
                     "— it happens intermittently on large owner-wide "
@@ -313,4 +314,4 @@ def search_paginated_with_viewer(
             if not page.get("hasNextPage") or not cursor:
                 return nodes, total, viewer
     finally:
-        _progress_clear()
+        progress_clear()

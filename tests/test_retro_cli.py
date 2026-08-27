@@ -3,8 +3,10 @@ the activity fetches, with ``gh`` stubbed at the shared chokepoint."""
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -239,7 +241,7 @@ def test_fetch_persistent_transient_failure_raises(monkeypatch) -> None:
         github.fetch_events("simon")
 
     assert "HTTP 502" in str(excinfo.value)
-    assert len(fake_run.calls) == gh._MAX_ATTEMPTS
+    assert len(fake_run.calls) == gh.MAX_ATTEMPTS
 
 
 def test_fetch_non_transient_failure_does_not_retry(monkeypatch) -> None:
@@ -250,6 +252,61 @@ def test_fetch_non_transient_failure_does_not_retry(monkeypatch) -> None:
         github.fetch_events("simon")
 
     assert len(fake_run.calls) == 1
+
+
+# --- the stderr progress line -------------------------------------------------
+
+
+class _TtyStderr(io.StringIO):
+    """A StringIO posing as a terminal, so ``gh.progress`` writes to it."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+def test_fetch_paints_progress_on_a_tty(monkeypatch) -> None:
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    fake_run, _ = _paged_run([json.dumps([review_event()])])
+    monkeypatch.setattr(gh, "run_command", fake_run)
+
+    github.fetch_events("simon")
+
+    assert "Fetching your GitHub events (page 1/3)…" in stderr.getvalue()
+
+
+def test_fetch_is_silent_when_stderr_is_not_a_tty(monkeypatch) -> None:
+    stderr = io.StringIO()  # isatty() is False
+    monkeypatch.setattr(sys, "stderr", stderr)
+    fake_run, _ = _paged_run(
+        [
+            json.dumps([review_event()]),
+            json.dumps({"total_count": 1, "items": [pr_item()]}),
+            compare_payload(),
+        ]
+    )
+    monkeypatch.setattr(gh, "run_command", fake_run)
+
+    github.fetch_events("simon")
+    github.fetch_opened("simon", "2026-06-06")
+    github.fetch_compares([("acme/widget", "a" * 8, "b" * 8)])
+
+    assert stderr.getvalue() == ""
+
+
+def test_run_clears_the_progress_line_before_rendering(monkeypatch) -> None:
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    _stub(monkeypatch, events=[review_event()])
+
+    def painting_events(login: str) -> list[dict[str, Any]]:
+        gh.progress("Searching PRs opened…")
+        return [review_event()]
+
+    monkeypatch.setattr(github, "fetch_events", painting_events)
+
+    assert cli.main(["retro", "--color", "never"]) == 0
+    assert stderr.getvalue().endswith("\r\x1b[2K")
 
 
 def test_compare_retries_a_transient_failure(monkeypatch) -> None:
