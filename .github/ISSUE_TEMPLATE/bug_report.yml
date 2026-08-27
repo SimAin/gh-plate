@@ -1,0 +1,32 @@
+name: Bug report
+description: Something renders wrong, errors, or misbehaves.
+labels: [bug]
+body:
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: The exact `plate …` invocation (redact repo/org names if you need to).
+      placeholder: plate prs --owner my-org --stale-days 7
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: Paste output in a code block. `--color never` avoids colour codes; `--format markdown` where it applies.
+    validations:
+      required: true
+  - type: textarea
+    id: version
+    attributes:
+      label: Versions
+      description: Output of `plate --version`, `gh --version | head -1`, and `python3 --version`.
+      placeholder: plate 1.6.0 · gh version 2.x · Python 3.12
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and terminal
+      placeholder: macOS 15 / iTerm2 · Windows 11 / Windows Terminal · Ubuntu / tmux
