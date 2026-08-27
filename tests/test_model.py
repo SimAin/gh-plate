@@ -614,3 +614,40 @@ def test_sprint_drops_items_missing_iteration_value() -> None:
 def test_sprint_empty_when_no_matching_items() -> None:
     view = sprint([make_item(1, typename="PullRequest")])
     assert view.is_empty
+
+
+# --- untrusted text -------------------------------------------------------------
+
+HOSTILE_TITLE = (
+    "Boring\x1b[2J\x1b[H title \x1b]8;;https://evil.example\x1b\\here\x1b]8;;\x1b\\"
+)
+HOSTILE_LABEL = "\x1b[31mbug\x1b[0m"
+
+
+def test_issue_titles_and_labels_carry_no_control_characters() -> None:
+    from plate.issues import render
+
+    idx = index([make_issue(1, title=HOSTILE_TITLE, labels=[HOSTILE_LABEL, "ok"])])
+    row = idx[(REPO, 1)]
+    assert row.title == "Boring title here"
+    assert row.labels == ["bug", "ok"]
+    out = render.terminal_tree(model.build_forest(idx), use_color=False)
+    assert "\x1b" not in out and "\x07" not in out
+    assert "\x1b" not in render.markdown_tree(model.build_forest(idx))
+
+
+def test_sprint_board_fields_carry_no_control_characters() -> None:
+    view = sprint(
+        [
+            make_item(
+                1,
+                title=HOSTILE_TITLE,
+                status="\x1b[31mIn progress\x1b[0m",
+                iteration="Sprint\x1b[2J 7",
+                assignees=["me"],
+            )
+        ]
+    )
+    assert view.title == "Sprint 7"
+    assert view.yours[0].status == "In progress"
+    assert "\x1b" not in view.yours[0].title

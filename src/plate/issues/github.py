@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from plate.core import gh
+from plate.core.render import compact_text
 
 from .model import normalize_status, strip_emoji
 
@@ -433,7 +434,8 @@ def _names_of_type(fields: list[dict[str, Any]], data_type: str) -> list[str]:
 
 
 def _format_names(names: list[str]) -> str:
-    return ", ".join(f'"{name}"' for name in names) if names else "none"
+    # Board field/option names are board-admin text — clean them like any title.
+    return ", ".join(f'"{compact_text(name)}"' for name in names) if names else "none"
 
 
 def _require_field(

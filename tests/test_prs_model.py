@@ -694,3 +694,10 @@ def test_timeline_direction_is_viewer_relative() -> None:
     assert line[-3] is not None and line[-3].mine is True
     assert line[-2] is not None and line[-2].mine is False
     assert line[-1] is not None and line[-1].mine is None
+
+
+def test_clean_title_neutralises_control_characters() -> None:
+    hostile = "Add\x1b[2J feature \x1b]8;;https://evil.example\x1b\\x\x1b]8;;\x1b\\\x07"
+    out = model.clean_title(hostile)
+    assert "\x1b" not in out and "\x07" not in out
+    assert out.startswith("Add") and "feature" in out

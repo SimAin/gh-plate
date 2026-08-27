@@ -1085,3 +1085,8 @@ def test_fetch_project_fields_returns_dict_nodes_only(
     fields = github.fetch_project_fields("acme", "organization", 2)
     assert [f["name"] for f in fields] == ["Sprint", "Status"]
     assert fields[1]["options"] == [{"name": "Backlog"}]
+
+
+def test_format_names_cleans_board_text() -> None:
+    assert github._format_names(["Todo\x1b[2J\x1b[H", "Done"]) == '"Todo", "Done"'
+    assert github._format_names([]) == "none"

@@ -645,3 +645,32 @@ def test_owner_key_mentions_dual_glyph_meaning() -> None:
 
 def test_owner_key_plain_when_color_off() -> None:
     assert "\033[" not in render.owner_key(use_color=False)
+
+
+# --- untrusted text is sanitised before it reaches the terminal ------------------
+
+
+def test_compact_text_neutralises_control_characters() -> None:
+    from plate.core.render import compact_text
+
+    hostile = (
+        "Fix login \x1b]8;;https://evil.example/x\x1b\\click\x1b]8;;\x1b\\ now\x07"
+    )
+    out = compact_text(hostile)
+    assert out == "Fix login click now"
+    assert compact_text("\x1b[31mbug\x1b[0m") == "bug"
+    assert compact_text("tail\x1b") == "tail"  # lone ESC, no sequence to strip
+    assert compact_text("a\x9b31mb") == "ab"  # 8-bit CSI introducer
+    # C1 controls and DEL go the same way; ordinary whitespace still collapses.
+    assert compact_text("a\x85b\x7fc\n\n  d\te") == "a b c d e"
+    assert compact_text(None) == "" and compact_text(42) == ""
+    # Emoji, ZWJ sequences and East Asian text are not control characters.
+    assert compact_text("🚀 打开 👩‍💻") == "🚀 打开 👩‍💻"
+
+
+def test_hyperlink_stays_plain_when_url_carries_control_bytes() -> None:
+    from plate.core.render import hyperlink
+
+    assert hyperlink("#1", "https://x/1\x1b\\\x1b[2J", enabled=True) == "#1"
+    assert hyperlink("#1", "https://x/1\x07", enabled=True) == "#1"
+    assert "\x1b]8;;https://x/1\x1b\\" in hyperlink("#1", "https://x/1", enabled=True)

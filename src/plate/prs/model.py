@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from plate.core.render import compact_text
+
 DEFAULT_STALE_DAYS = 14
 TIMELINE_DAYS = 28
 
@@ -121,12 +123,6 @@ def connection_nodes(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
-
-
-def compact_text(value: Any) -> str:
-    if not isinstance(value, str):
-        return ""
-    return " ".join(value.splitlines())
 
 
 def truncate(value: str, max_length: int) -> str:
