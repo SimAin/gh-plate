@@ -1,34 +1,47 @@
 # plate
 
-`plate issues` prints a compact terminal status table for the open GitHub
-issues **assigned to you** in a repository — "what's on my plate, and what's
-rotting?" `plate` is the renamed, restructured successor to
-`gh-issue-check` (a hard switch — the `issue-check` command is gone; earlier
-versions remain installable if you need the old CLI).
+`plate` prints compact, opinionated status tables for your GitHub work,
+straight in the terminal:
+
+- **`plate issues`** — the open issues **assigned to you** in a repository, as
+  a tree: *"what's on my plate, and what's rotting?"*
+- **`plate prs`** — the open pull requests in a repository, grouped by whose
+  turn it is: *"what's waiting on review, and what's mine?"*
+- **`plate retro`** — a day-by-day retrospective of your own activity, one
+  panel per repository owner.
 
 It follows a deliberate discipline: group by whose turn it is, one health glyph
-per row, colour rationed to health, weight encoding attention. This is the
-**"yours" MVP slice** — see
-[`MVP.md`](./MVP.md) for exactly what is and isn't built yet.
+per row, colour rationed to health, weight encoding attention. It is a glance,
+not a dashboard — one command, one table, done. If you want an interactive
+panel to live in, [gh-dash](https://github.com/dlvhdr/gh-dash) is that tool;
+`plate` is for the thirty seconds before you decide what to do next.
 
-It shells out to `git` and `gh` (GraphQL), so the GitHub CLI must be installed
-and authenticated (`gh auth login`).
+## Requirements
+
+- Python 3.11 or newer.
+- The [GitHub CLI](https://cli.github.com) (`gh`), installed and authenticated
+  (`gh auth login`). `plate` shells out to `gh` for every query and holds no
+  credentials of its own.
+- For `plate issues --sprint` only: the `read:project` scope
+  (`gh auth refresh -s read:project`).
+
+No other dependencies — the package is pure standard library.
 
 ## Install
 
-This is a [uv](https://docs.astral.sh/uv/) project. To install the `plate`
-executable on your PATH:
+With [uv](https://docs.astral.sh/uv/):
 
 ```sh
-uv tool install --editable .
+uv tool install git+https://github.com/SimAin/gh-plate
 ```
 
-For local development (creates `.venv`, installs dev tools):
+or with [pipx](https://pipx.pypa.io/):
 
 ```sh
-uv sync
-uv run plate issues --help
+pipx install git+https://github.com/SimAin/gh-plate
 ```
+
+Then `plate --help`. To work on the code itself, see [Development](#development).
 
 ## Usage
 
@@ -88,7 +101,7 @@ significant is shown (`open > draft > merged > closed`):
 | `✗` red | closed | a PR was opened then abandoned — shown for context |
 
 In `--format markdown` the marker carries the PR number and state word
-(`⇄ #2457 draft`, `⇄ #1115 merged`).
+(`⇄ #12 draft`, `⇄ #14 merged`).
 
 The other columns carry the detail (for your own issues; blank on context rows):
 
@@ -106,8 +119,7 @@ The other columns carry the detail (for your own issues; blank on context rows):
 ## PR view (`plate prs`)
 
 `plate prs` prints a compact terminal status table for the **open pull
-requests** in a repository — "what's waiting on review, and what's mine?" It
-is the renamed, restructured successor to `gh-pr-status` (`pr-check`).
+requests** in a repository — "what's waiting on review, and what's mine?"
 
 ```sh
 plate prs
@@ -204,7 +216,7 @@ anywhere:
 
 ```sh
 plate prs --owner my-org         # an organization
-plate prs --owner SimAin         # a personal account
+plate prs --owner your-login     # a personal account
 plate prs --owner work           # a configured alias (see below)
 plate prs --owner my-org --mine  # narrow to PRs you authored
 plate prs --owner my-org --format markdown
@@ -214,7 +226,8 @@ The account type (org vs. user) is detected automatically, and the same
 [owner aliases](#owner-aliases-configuration) apply (`work → company-org` is
 echoed when an alias fires). `--mine` narrows to PRs **you authored** — note
 this is narrower than the repo view's "yours" group (author *or* assignee);
-see `DECISIONS.md` D9 for why. It is only meaningful with `--owner`.
+see [D9 in `DECISIONS.md`](./DECISIONS.md) for why. It is only meaningful with
+`--owner`.
 
 The same honesty notes as the issues owner view apply: archived repos are
 excluded, results are sorted most-recently-active first, and a truncation note
@@ -242,13 +255,15 @@ plate retro --days 21    # 7-30
    commits     ·  ·  1  ·  2  ·  ·  ·  ·  ·  4  6  5  3   21   today
    opened      ·  ·  ·  1  ·  ·  ·  ·  ·  ·  ·  1  ·  ·    2   last 2d ago
    closed      ·  ·  1  ·  ·  ·  1  ·  ·  ·  ·  ·  1  ·    3   last 1d ago
-── SimAin · last 14 days ───────────────────────────────────────────
+── a-user · last 14 days ───────────────────────────────────────────
                S  S  M  T  W  T  F  S  S  M  T  W  T  F    Σ
    reviews     ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·    0   none in 14d
    commits     ·  ·  ·  ·  3  ·  ·  ·  ·  ·  ·  2  ·  1    6   today
    opened      ·  ·  ·  ·  1  ·  ·  ·  ·  ·  ·  ·  ·  ·    1   last 9d ago
    closed      ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  1  ·  ·    1   last 2d ago
 ```
+
+*(Owners and counts above are synthetic.)*
 
 Owners appear most active first. Columns are days (weekday ruler, weekends
 dimmed, today bold, rightmost = today), digits are counts, `Σ` is the window
@@ -306,7 +321,7 @@ released items are included (a finished sprint item shows its status). It is a
 single query — the board is filtered to its current iteration server-side.
 
 This is opt-in per repo: a repo must be mapped to a project board in config
-(below). See [`SPRINT.md`](./SPRINT.md) for the full design.
+(below).
 
 ### Configuring the board
 
@@ -349,7 +364,7 @@ someone else's issues are dimmed. It needs no checkout, so it runs from anywhere
 
 ```sh
 plate issues --owner my-org         # an organization
-plate issues --owner SimAin         # a personal account
+plate issues --owner your-login     # a personal account
 plate issues --owner work           # a configured alias (see below)
 plate issues --owner my-org --mine  # narrow to issues assigned to you
 plate issues --owner my-org --format markdown
@@ -367,7 +382,7 @@ alias to an org or username you type often:
 ```json
 {
   "owners": {
-    "personal": "SimAin",
+    "personal": "your-login",
     "work":     "company-org"
   }
 }
@@ -417,20 +432,27 @@ file merges over the built-in default, so you only list what you want to change.
 ## Development
 
 ```sh
-uv run pytest      # tests
-uv run ruff check  # lint
-uv run mypy        # type-check (src/)
+git clone https://github.com/SimAin/gh-plate && cd gh-plate
+uv sync                    # creates .venv with dev tools
+uv run plate issues --help
+uv run pytest              # tests
+uv run ruff check          # lint
+uv run ruff format --check # formatting
+uv run mypy                # type-check (src/)
 ```
 
+`uv tool install --editable .` puts a `plate` on your PATH that tracks the
+checkout.
+
 The package is split into `plate/core/` (shared, domain-agnostic plumbing) and
-one directory per domain — `plate/issues/` and `plate/prs/` sit side by side.
-The boundary rule is enforced by `tests/test_boundaries.py`: a domain package
-may import `plate.core`, but never another domain package, and `plate.core`
-never imports a domain package back (issue #50).
+one directory per domain — `plate/issues/`, `plate/prs/` and `plate/retro/`
+sit side by side. The boundary rule is enforced by `tests/test_boundaries.py`:
+a domain package may import `plate.core`, but never another domain package,
+and `plate.core` never imports a domain package back.
 
 | Module | Responsibility |
 | --- | --- |
-| `plate/cli.py` | Top-level wiring only: builds the parser, dispatches to a subcommand via a command→runner registry, turns a `PlateError` into a clean exit. Knows nothing about issues, sprints, owners, or PRs — this is the one place both domains may be named. |
+| `plate/cli.py` | Top-level wiring only: builds the parser, dispatches to a subcommand via a command→runner registry, turns a `PlateError` into a clean exit. Knows nothing about issues, sprints, owners, PRs, or retros — this is the one place the domains may be named. |
 | `plate/core/gh.py` | The only impure module: `git`/`gh` shelling (`run_command`), repo + login detection, owner-type resolution. Failures raise `PlateError`. Shared by every domain. |
 | `plate/core/render.py` | Domain-agnostic presentation primitives: ANSI/width helpers, `format_cell`, `format_age`, `hyperlink`, `divider`. |
 | `plate/core/config.py` | The JSON config: special-label styles, the per-repo `repos` → project-board mapping, and the `owners` alias table. |
@@ -442,11 +464,24 @@ never imports a domain package back (issue #50).
 | `plate/prs/github.py` | PR-domain GraphQL fetches (`fetch_prs_and_viewer`, `fetch_owner_prs`) + `gh api graphql --paginate` pagination, built on `plate.core.gh`. |
 | `plate/prs/render.py` | PR-domain presentation: `terminal_table`/`markdown_table`, `owner_table`/`owner_markdown`, `summary_line`, `symbol_key`/`owner_key`, built on `plate.core.render`. |
 | `plate/prs/cli.py` | The `prs` subcommand: flags, and `run()`/`_run_repo`/`_run_owner` dispatch (`--owner` selects the owner-wide view). |
+| `plate/retro/model.py` | Pure domain: events → per-day push groups, compare expansion → commit refs, the per-owner channel sections and window arithmetic. |
+| `plate/retro/github.py` | Retro-domain REST fetches (events feed, PR search, compare API), built on `plate.core.gh`. |
+| `plate/retro/render.py` | Retro-domain presentation: the per-owner day grid (`panel`) and its markdown table. |
+| `plate/retro/cli.py` | The `retro` subcommand: flags and `run()`. |
 
 ## Design & docs
 
 | File | What it is |
 | --- | --- |
-| [`MVP.md`](./MVP.md) | The default ("yours") slice: scope, data layer, columns, hierarchy, acceptance. |
-| [`SPRINT.md`](./SPRINT.md) | The `--sprint` slice: board data layer, buckets, columns, config, acceptance. |
-| [`DECISIONS.md`](./DECISIONS.md) | Decision log with rationale. |
+| [`DECISIONS.md`](./DECISIONS.md) | Decision log with rationale — why the views look the way they do. |
+| [`CHANGELOG.md`](./CHANGELOG.md) | Release history, generated by release-please. |
+
+## History
+
+`plate` absorbed two earlier single-purpose tools, `gh-issue-check`
+(`issue-check`) and `gh-pr-status` (`pr-check`), which are no longer
+maintained. The changelog records the transition.
+
+## Licence
+
+[MIT](./LICENSE).
