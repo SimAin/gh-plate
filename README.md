@@ -1,5 +1,7 @@
 # plate
 
+[![CI](https://github.com/SimAin/gh-plate/actions/workflows/ci.yml/badge.svg)](https://github.com/SimAin/gh-plate/actions/workflows/ci.yml) [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](./LICENSE)
+
 `plate` prints compact, opinionated status tables for your GitHub work,
 straight in the terminal:
 

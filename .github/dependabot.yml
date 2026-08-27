@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # Keep the SHA-pinned actions in the workflows current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # Minor/patch bumps arrive together; majors come one PR each.
+      actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
