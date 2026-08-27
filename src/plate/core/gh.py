@@ -16,7 +16,8 @@ import re
 import subprocess
 import sys
 import time
-from typing import Any
+from collections.abc import Callable
+from typing import Any, NamedTuple
 
 _REMOTE_PATTERNS = [
     r"^git@github\.com:(?P<repo>[^/]+/[^/]+?)(?:\.git)?$",
@@ -119,30 +120,89 @@ def resolve_owner_type(owner: str) -> str:
 
 # GitHub answers an over-expensive search page with a bare HTTP 502 (sometimes
 # 503/504): the query exceeded its server-side time budget. Per GitHub's own
-# guidance, retry and request fewer nodes — each page gets ``_MAX_ATTEMPTS``
+# guidance, retry and request fewer nodes — each page gets ``MAX_ATTEMPTS``
 # tries, halving the page size on every transient 5xx (100 → 50 → 25).
 _TRANSIENT_HTTP = re.compile(r"HTTP (50[234])")
 _MAX_PAGE_SIZE = 100
 _MIN_PAGE_SIZE = 25
-_MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 1.0
+
+# Rate limiting — the hourly budget, the secondary abuse limit (an HTTP 403),
+# or a bare HTTP 429 — is not transient: the wait is minutes, so retrying in
+# here would just hang. Name the cause instead; the raw stderr reads like a bug.
+_RATE_LIMITED = re.compile(r"rate limit|HTTP 429", re.IGNORECASE)
+_RATE_LIMIT_ADVICE = "narrow the query (--repo, --mine, a smaller --limit)"
+
+
+def rate_limit_hint(stderr: str, advice: str = _RATE_LIMIT_ADVICE) -> str:
+    """A leading-newline hint when ``stderr`` is GitHub rate limiting, else "".
+
+    ``advice`` is the caller's way out, since the flags that shrink a request
+    differ per view.
+    """
+    if not _RATE_LIMITED.search(stderr):
+        return ""
+    return f"\nGitHub is rate limiting this token. Wait a few minutes, or {advice}."
 
 
 # A self-overwriting stderr status line (``\r`` + erase-line), so a slow
-# multi-page search — especially one sleeping through 502 retries — doesn't
-# read as a hang. TTY-gated: pipes, redirects, and scripts see nothing.
-def _progress(message: str) -> None:
+# multi-page fetch — especially one sleeping through 502 retries — doesn't
+# read as a hang. Callers own the wording and must clear the line before
+# anything real prints. TTY-gated: pipes, redirects, and scripts see nothing.
+def progress(message: str) -> None:
     if not sys.stderr.isatty():
         return
     sys.stderr.write(f"\r\x1b[2K{message}")
     sys.stderr.flush()
 
 
-def _progress_clear() -> None:
+def progress_clear() -> None:
     if not sys.stderr.isatty():
         return
     sys.stderr.write("\r\x1b[2K")
     sys.stderr.flush()
+
+
+class GhAttempt(NamedTuple):
+    """What :func:`run_gh_with_retry` came back with."""
+
+    result: subprocess.CompletedProcess[str]
+    status: str  # the last transient HTTP status seen; "5xx" if there was none
+    exhausted: bool  # every attempt failed transiently
+    attempts: int  # how many calls were actually made
+
+
+def run_gh_with_retry(
+    build_args: Callable[[], list[str]],
+    *,
+    on_transient: Callable[[str, int], None] | None = None,
+) -> GhAttempt:
+    """Run a ``gh`` call, retrying only transient 5xx answers.
+
+    The policy is shared — what counts as transient, the backoff, how many
+    tries — but the messages are not: a search timing out and an activity feed
+    failing need different advice, so callers inspect the returned attempt and
+    word their own :class:`PlateError`. ``build_args`` is called once per try
+    so a caller can shrink its request between them; ``on_transient`` fires on
+    every transient failure, before any sleep.
+    """
+    status = "5xx"
+    attempt = 1
+    while True:
+        result = run_command(build_args())
+        if result.returncode == 0:
+            return GhAttempt(result, status, False, attempt)
+        transient = _TRANSIENT_HTTP.search(result.stderr)
+        if not transient:
+            return GhAttempt(result, status, False, attempt)
+        status = transient.group(1)
+        if on_transient is not None:
+            on_transient(status, attempt)
+        if attempt >= MAX_ATTEMPTS:
+            return GhAttempt(result, status, True, attempt)
+        time.sleep(_RETRY_DELAY_SECONDS * attempt)
+        attempt += 1
 
 
 def search_paginated(
@@ -191,7 +251,7 @@ def search_paginated_with_viewer(
     pagination ever delivers — it is not only the true count clipped by
     ``limit``.
 
-    A transient stderr status line (see ``_progress``) shows fetch and retry
+    A transient stderr status line (see ``progress``) shows fetch and retry
     progress; the ``finally`` clears it on every exit, return or raise.
     """
     nodes: list[dict[str, Any]] = []
@@ -200,54 +260,53 @@ def search_paginated_with_viewer(
     cursor: str | None = None
     page_cap = _MAX_PAGE_SIZE
 
+    def page_args() -> list[str]:
+        fetched = f" {len(nodes)}/{min(total, limit)}" if nodes else ""
+        progress(f"Fetching from GitHub for {error_context}…{fetched}")
+        page_size = min(page_cap, limit - len(nodes))
+        args = [
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            f"query={query}",
+            "-f",
+            f"q={query_str}",
+            "-F",
+            f"pageSize={page_size}",
+        ]
+        if cursor:
+            args += ["-f", f"endCursor={cursor}"]
+        return args
+
+    def shrink_page(status: str, attempt: int) -> None:
+        nonlocal page_cap
+        page_cap = max(page_cap // 2, _MIN_PAGE_SIZE)
+        if attempt < MAX_ATTEMPTS:
+            progress(
+                f"GitHub timed out (HTTP {status}) — retrying with "
+                f"page size {page_cap} "
+                f"(attempt {attempt + 1}/{MAX_ATTEMPTS})…"
+            )
+
     try:
         while True:
-            status = "5xx"
-            for attempt in range(1, _MAX_ATTEMPTS + 1):
-                fetched = f" {len(nodes)}/{min(total, limit)}" if nodes else ""
-                _progress(f"Fetching from GitHub for {error_context}…{fetched}")
-                page_size = min(page_cap, limit - len(nodes))
-                args = [
-                    "gh",
-                    "api",
-                    "graphql",
-                    "-f",
-                    f"query={query}",
-                    "-f",
-                    f"q={query_str}",
-                    "-F",
-                    f"pageSize={page_size}",
-                ]
-                if cursor:
-                    args += ["-f", f"endCursor={cursor}"]
-
-                result = run_command(args)
-                if result.returncode == 0:
-                    break
-                transient = _TRANSIENT_HTTP.search(result.stderr)
-                if not transient:
-                    raise PlateError(
-                        f"gh search failed for {error_context}:\n"
-                        f"{result.stderr.strip()}"
-                    )
-                status = transient.group(1)
-                page_cap = max(page_cap // 2, _MIN_PAGE_SIZE)
-                if attempt < _MAX_ATTEMPTS:
-                    _progress(
-                        f"GitHub timed out (HTTP {status}) — retrying with "
-                        f"page size {page_cap} "
-                        f"(attempt {attempt + 1}/{_MAX_ATTEMPTS})…"
-                    )
-                    time.sleep(_RETRY_DELAY_SECONDS * attempt)
-            else:
+            attempt = run_gh_with_retry(page_args, on_transient=shrink_page)
+            if attempt.exhausted:
                 raise PlateError(
                     f"gh search failed for {error_context}: GitHub answered "
-                    f"HTTP {status} on {_MAX_ATTEMPTS} attempts "
+                    f"HTTP {attempt.status} on {MAX_ATTEMPTS} attempts "
                     f"(page size reduced to {page_cap}).\n"
                     "That status is GitHub timing the search out server-side "
                     "— it happens intermittently on large owner-wide "
                     "searches. Wait a moment and rerun; if it persists, try "
                     "a lower --limit."
+                )
+            result = attempt.result
+            if result.returncode != 0:
+                raise PlateError(
+                    f"gh search failed for {error_context}:\n"
+                    f"{result.stderr.strip()}{rate_limit_hint(result.stderr)}"
                 )
             try:
                 payload = json.loads(result.stdout)
@@ -273,4 +332,4 @@ def search_paginated_with_viewer(
             if not page.get("hasNextPage") or not cursor:
                 return nodes, total, viewer
     finally:
-        _progress_clear()
+        progress_clear()

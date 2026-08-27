@@ -83,14 +83,19 @@ def run(args: argparse.Namespace) -> int:
 
     now = datetime.now(UTC)
     since_date = window_start(args.days, now).date().isoformat()
-    events = github.fetch_events(login)
-    groups = push_groups(events, args.days, now)
-    compares = github.fetch_compares(
-        [(group.repo, group.base, group.head) for group in groups]
-    )
-    commit_refs, unexpanded = commits_from_compares(groups, compares, login)
-    opened_items, opened_total = github.fetch_opened(login, since_date)
-    closed_items, closed_total = github.fetch_closed(login, since_date)
+    # The retro is the slowest view — a couple of dozen sequential calls — so
+    # the fetches paint a stderr status line; clear it before anything prints.
+    try:
+        events = github.fetch_events(login)
+        groups = push_groups(events, args.days, now)
+        compares = github.fetch_compares(
+            [(group.repo, group.base, group.head) for group in groups]
+        )
+        commit_refs, unexpanded = commits_from_compares(groups, compares, login)
+        opened_items, opened_total = github.fetch_opened(login, since_date)
+        closed_items, closed_total = github.fetch_closed(login, since_date)
+    finally:
+        gh.progress_clear()
     sections = build_sections(
         commit_refs, opened_items, closed_items, events, args.days, now
     )

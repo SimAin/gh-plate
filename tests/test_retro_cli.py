@@ -3,8 +3,10 @@ the activity fetches, with ``gh`` stubbed at the shared chokepoint."""
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -180,6 +182,22 @@ def test_fetch_gh_failure_raises(monkeypatch) -> None:
         github.fetch_events("simon")
 
 
+def test_fetch_rate_limit_failure_explains_itself(monkeypatch) -> None:
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, 1, stdout="", stderr="gh: You have exceeded a secondary rate limit"
+        )
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    with pytest.raises(PlateError) as excinfo:
+        github.fetch_events("simon")
+
+    message = str(excinfo.value)
+    assert "secondary rate limit" in message  # the raw stderr is kept
+    assert "GitHub is rate limiting this token" in message
+    assert "--days" in message
+
+
 def test_fetch_malformed_json_raises(monkeypatch) -> None:
     def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args, 0, stdout="{not json", stderr="")
@@ -200,6 +218,160 @@ def test_fetch_unexpected_payloads_raise(monkeypatch) -> None:
         github.fetch_events("simon")
     with pytest.raises(PlateError, match="unexpected search payload"):
         github.fetch_opened("simon", "2026-06-06")
+
+
+# --- transient-5xx retries (the same policy the search views use) -------------
+#
+# The sleep between attempts is patched out so these stay instant.
+
+
+def _flaky_run(failures: int, body: str, stderr: str = "gh: HTTP 502") -> Any:
+    """A fake ``run_command`` failing ``failures`` times before succeeding."""
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if len(calls) <= failures:
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr=stderr)
+        return subprocess.CompletedProcess(args, 0, stdout=body, stderr="")
+
+    fake_run.calls = calls  # type: ignore[attr-defined]
+    return fake_run
+
+
+def test_fetch_retries_a_transient_failure(monkeypatch) -> None:
+    fake_run = _flaky_run(1, json.dumps([review_event()]))
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
+
+    assert len(github.fetch_events("simon")) == 1
+    assert len(fake_run.calls) == 2
+
+
+def test_fetch_persistent_transient_failure_raises(monkeypatch) -> None:
+    fake_run = _flaky_run(99, "")
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    sleeps: list[float] = []
+    monkeypatch.setattr(gh.time, "sleep", sleeps.append)
+
+    with pytest.raises(PlateError) as excinfo:
+        github.fetch_events("simon")
+
+    assert "HTTP 502" in str(excinfo.value)
+    assert len(fake_run.calls) == gh.MAX_ATTEMPTS
+    assert sleeps == [1.0, 2.0]  # backoff grows; nothing after the last attempt
+
+
+def test_fetch_non_transient_failure_does_not_retry(monkeypatch) -> None:
+    fake_run = _flaky_run(99, "", stderr="gh: HTTP 404 Not Found")
+    monkeypatch.setattr(gh, "run_command", fake_run)
+
+    with pytest.raises(PlateError, match="authenticated"):
+        github.fetch_events("simon")
+
+    assert len(fake_run.calls) == 1
+
+
+# --- the stderr progress line -------------------------------------------------
+
+
+class _TtyStderr(io.StringIO):
+    """A StringIO posing as a terminal, so ``gh.progress`` writes to it."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+def test_fetch_paints_progress_on_a_tty(monkeypatch) -> None:
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    fake_run, _ = _paged_run([json.dumps([review_event()])])
+    monkeypatch.setattr(gh, "run_command", fake_run)
+
+    github.fetch_events("simon")
+
+    assert "Fetching your GitHub events…" in stderr.getvalue()
+
+
+def test_fetch_paints_retry_progress_on_a_tty(monkeypatch) -> None:
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    fake_run = _flaky_run(1, json.dumps([review_event()]))
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
+
+    github.fetch_events("simon")
+
+    output = stderr.getvalue()
+    assert "GitHub answered HTTP 502 — retrying (attempt 2/3)…" in output
+    assert output.startswith("\r\x1b[2K")
+
+
+def test_fetch_compares_paints_branch_progress_on_a_tty(monkeypatch) -> None:
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, stdout=compare_payload(), stderr="")
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    github.fetch_compares([("acme/widget", "a" * 8, "b" * 8)])
+    assert "Expanding pushes on 1 branch…" in stderr.getvalue()
+
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    github.fetch_compares(
+        [
+            ("acme/widget", "a" * 8, "b" * 8),
+            ("acme/other", "c" * 8, "d" * 8),
+        ]
+    )
+    assert "Expanding pushes on 2 branches…" in stderr.getvalue()
+
+
+def test_fetch_is_silent_when_stderr_is_not_a_tty(monkeypatch) -> None:
+    stderr = io.StringIO()  # isatty() is False
+    monkeypatch.setattr(sys, "stderr", stderr)
+    fake_run, _ = _paged_run(
+        [
+            json.dumps([review_event()]),
+            json.dumps({"total_count": 1, "items": [pr_item()]}),
+            compare_payload(),
+        ]
+    )
+    monkeypatch.setattr(gh, "run_command", fake_run)
+
+    github.fetch_events("simon")
+    github.fetch_opened("simon", "2026-06-06")
+    github.fetch_compares([("acme/widget", "a" * 8, "b" * 8)])
+
+    assert stderr.getvalue() == ""
+
+
+def test_run_clears_the_progress_line_before_rendering(monkeypatch) -> None:
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    _stub(monkeypatch, events=[review_event()])
+
+    def painting_events(login: str) -> list[dict[str, Any]]:
+        gh.progress("Searching PRs opened…")
+        return [review_event()]
+
+    monkeypatch.setattr(github, "fetch_events", painting_events)
+
+    assert cli.main(["retro", "--color", "never"]) == 0
+    assert stderr.getvalue().endswith("\r\x1b[2K")
+
+
+def test_compare_retries_a_transient_failure(monkeypatch) -> None:
+    fake_run = _flaky_run(1, compare_payload())
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
+
+    compares = github.fetch_compares([("acme/widget", "a" * 8, "b" * 8)])
+
+    assert compares[0] is not None
+    assert len(fake_run.calls) == 2
 
 
 # --- flags ---------------------------------------------------------------------

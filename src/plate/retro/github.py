@@ -36,12 +36,32 @@ SEARCH_MAX_PAGES = 10  # any search caps at 1000 results
 COMPARE_WORKERS = 8
 
 
+def _report_retry(status: str, attempt: int) -> None:
+    if attempt < gh.MAX_ATTEMPTS:
+        gh.progress(
+            f"GitHub answered HTTP {status} — retrying "
+            f"(attempt {attempt + 1}/{gh.MAX_ATTEMPTS})…"
+        )
+
+
 def _fetch_json(path: str) -> Any:
-    result = gh.run_command(["gh", "api", path])
+    attempt = gh.run_gh_with_retry(
+        lambda: ["gh", "api", path], on_transient=_report_retry
+    )
+    if attempt.exhausted:
+        raise gh.PlateError(
+            f"gh failed to fetch your activity: GitHub answered HTTP "
+            f"{attempt.status} on {attempt.attempts} attempts.\n"
+            "That status is GitHub failing the request server-side — it "
+            "happens intermittently. Wait a moment and rerun; if it "
+            "persists, try a shorter --days window."
+        )
+    result = attempt.result
     if result.returncode != 0:
         raise gh.PlateError(
             "gh failed to fetch your activity "
             f"(is `gh` authenticated?):\n{result.stderr.strip()}"
+            + gh.rate_limit_hint(result.stderr, "use a shorter --days window")
         )
     try:
         return json.loads(result.stdout)
@@ -53,6 +73,8 @@ def fetch_events(login: str) -> list[dict[str, Any]]:
     """The viewer's recent public+private activity events, newest first."""
     events: list[dict[str, Any]] = []
     for page in range(1, EVENTS_MAX_PAGES + 1):
+        suffix = f" (page {page})" if page > 1 else ""
+        gh.progress(f"Fetching your GitHub events{suffix}…")
         batch = _fetch_json(
             f"users/{login}/events?per_page={EVENTS_PER_PAGE}&page={page}"
         )
@@ -64,13 +86,18 @@ def fetch_events(login: str) -> list[dict[str, Any]]:
     return events
 
 
-def _search_prs(login: str, qualifiers: str) -> tuple[list[dict[str, Any]], int]:
+def _search_prs(
+    login: str, qualifiers: str, describe: str
+) -> tuple[list[dict[str, Any]], int]:
     """One paginated PR search for ``login``: ``(items, server total)``.
     ``total`` can exceed what pagination retrieves (the 1000-result cap);
-    callers compare to report truncation honestly."""
+    callers compare to report truncation honestly. ``describe`` names the
+    channel on the progress line."""
     items: list[dict[str, Any]] = []
     total = 0
     for page in range(1, SEARCH_MAX_PAGES + 1):
+        suffix = f" (page {page})" if page > 1 else ""
+        gh.progress(f"Searching {describe}{suffix}…")
         payload = _fetch_json(
             f"search/issues?q=author:{login}+is:pr+{qualifiers}"
             f"&per_page={SEARCH_PER_PAGE}&page={page}"
@@ -88,19 +115,24 @@ def _search_prs(login: str, qualifiers: str) -> tuple[list[dict[str, Any]], int]
 
 def fetch_opened(login: str, since_date: str) -> tuple[list[dict[str, Any]], int]:
     """PRs opened by ``login`` since ``since_date`` (YYYY-MM-DD)."""
-    return _search_prs(login, f"created:>={since_date}")
+    return _search_prs(login, f"created:>={since_date}", "PRs opened")
 
 
 def fetch_closed(login: str, since_date: str) -> tuple[list[dict[str, Any]], int]:
     """PRs by ``login`` closed since ``since_date`` (YYYY-MM-DD) — merged and
     closed-without-merge alike; the channel means "left the plate"."""
-    return _search_prs(login, f"is:closed+closed:>={since_date}")
+    return _search_prs(login, f"is:closed+closed:>={since_date}", "PRs closed")
 
 
 def _fetch_compare(repo: str, base: str, head: str) -> dict[str, Any] | None:
     """One ``base...head`` comparison, or None when it can't be resolved
-    (force-pushed or garbage-collected shas) — the caller falls back."""
-    result = gh.run_command(["gh", "api", f"repos/{repo}/compare/{base}...{head}"])
+    (force-pushed or garbage-collected shas) — the caller falls back. A
+    transient 5xx is retried before giving up, so a flaky page doesn't quietly
+    cost a branch's commits."""
+    attempt = gh.run_gh_with_retry(
+        lambda: ["gh", "api", f"repos/{repo}/compare/{base}...{head}"]
+    )
+    result = attempt.result
     if result.returncode != 0:
         return None
     try:
@@ -120,5 +152,7 @@ def fetch_compares(
     """
     if not ranges:
         return []
+    branches = "branch" if len(ranges) == 1 else "branches"
+    gh.progress(f"Expanding pushes on {len(ranges)} {branches}…")
     with ThreadPoolExecutor(max_workers=min(COMPARE_WORKERS, len(ranges))) as executor:
         return list(executor.map(lambda r: _fetch_compare(*r), ranges))

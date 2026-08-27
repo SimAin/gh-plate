@@ -71,7 +71,7 @@ a domain package back.
 | Module | Responsibility |
 | --- | --- |
 | `plate/cli.py` | Top-level wiring only: builds the parser, dispatches to a subcommand via a command→runner registry, turns a `PlateError` into a clean exit. Knows nothing about issues, sprints, owners, PRs, or retros — this is the one place the domains may be named. |
-| `plate/core/gh.py` | The only impure module: `git`/`gh` shelling (`run_command`), repo + login detection, owner-type resolution. Failures raise `PlateError`. Shared by every domain. |
+| `plate/core/gh.py` | The only impure module: `git`/`gh` shelling (`run_command`), repo + login detection, owner-type resolution. Failures raise `PlateError`. Shared by every domain. Also the shared transient-5xx retry policy (`run_gh_with_retry`) and the stderr progress line (`progress`/`progress_clear`). |
 | `plate/core/render.py` | Domain-agnostic presentation primitives: ANSI/width helpers, `format_cell`, `format_age`, `hyperlink`, `divider`, `color_enabled`. |
 | `plate/core/text.py` | Data cleaning on the way in from a `gh` payload: `compact_text` (one safe line from untrusted text) and `parse_timestamp`. Shared by every domain's `model`. |
 | `plate/core/owner.py` | The owner-wide views' shared plumbing: `resolve_owner` (alias table, then GitHub's owner type) and `listing_truncation_note`. |
