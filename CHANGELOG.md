@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.0](https://github.com/SimAin/gh-plate/compare/v1.6.1...v1.7.0) (2026-08-27)
+
+
+### Features
+
+* **prs:** --config and --config-path; TERM=dumb disables colour; day-count docs ([#110](https://github.com/SimAin/gh-plate/issues/110)) ([4129f1d](https://github.com/SimAin/gh-plate/commit/4129f1d579715c343748e098e8f2b6d597e93f9a))
+
+
+### Bug Fixes
+
+* **retro:** retry transient gh failures, show progress, explain rate limits ([#108](https://github.com/SimAin/gh-plate/issues/108)) ([ff9156e](https://github.com/SimAin/gh-plate/commit/ff9156e00d03e0c9847e7b4fcb29a0d480915dbb))
+
 ## [1.6.1](https://github.com/SimAin/gh-plate/compare/v1.6.0...v1.6.1) (2026-08-27)
 
 
