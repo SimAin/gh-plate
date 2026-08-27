@@ -202,6 +202,67 @@ def test_fetch_unexpected_payloads_raise(monkeypatch) -> None:
         github.fetch_opened("simon", "2026-06-06")
 
 
+# --- transient-5xx retries (the same policy the search views use) -------------
+#
+# The sleep between attempts is patched out so these stay instant.
+
+
+def _flaky_run(failures: int, body: str, stderr: str = "gh: HTTP 502") -> Any:
+    """A fake ``run_command`` failing ``failures`` times before succeeding."""
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if len(calls) <= failures:
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr=stderr)
+        return subprocess.CompletedProcess(args, 0, stdout=body, stderr="")
+
+    fake_run.calls = calls  # type: ignore[attr-defined]
+    return fake_run
+
+
+def test_fetch_retries_a_transient_failure(monkeypatch) -> None:
+    fake_run = _flaky_run(1, json.dumps([review_event()]))
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
+
+    assert len(github.fetch_events("simon")) == 1
+    assert len(fake_run.calls) == 2
+
+
+def test_fetch_persistent_transient_failure_raises(monkeypatch) -> None:
+    fake_run = _flaky_run(99, "")
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(PlateError) as excinfo:
+        github.fetch_events("simon")
+
+    assert "HTTP 502" in str(excinfo.value)
+    assert len(fake_run.calls) == gh._MAX_ATTEMPTS
+
+
+def test_fetch_non_transient_failure_does_not_retry(monkeypatch) -> None:
+    fake_run = _flaky_run(99, "", stderr="gh: HTTP 404 Not Found")
+    monkeypatch.setattr(gh, "run_command", fake_run)
+
+    with pytest.raises(PlateError, match="authenticated"):
+        github.fetch_events("simon")
+
+    assert len(fake_run.calls) == 1
+
+
+def test_compare_retries_a_transient_failure(monkeypatch) -> None:
+    fake_run = _flaky_run(1, compare_payload())
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
+
+    compares = github.fetch_compares([("acme/widget", "a" * 8, "b" * 8)])
+
+    assert compares[0] is not None
+    assert len(fake_run.calls) == 2
+
+
 # --- flags ---------------------------------------------------------------------
 
 
