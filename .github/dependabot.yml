@@ -6,5 +6,7 @@ updates:
     schedule:
       interval: weekly
     groups:
+      # Minor/patch bumps arrive together; majors come one PR each.
       actions:
         patterns: ["*"]
+        update-types: ["minor", "patch"]

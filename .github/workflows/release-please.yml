@@ -8,6 +8,11 @@ permissions:
   contents: write
   pull-requests: write
 
+# Serialise: two quick main pushes must not race against the same release PR.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   release-please:
     runs-on: ubuntu-latest
