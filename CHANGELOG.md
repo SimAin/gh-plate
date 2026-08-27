@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.6.0](https://github.com/SimAin/gh-plate/compare/v1.5.0...v1.6.0) (2026-08-27)
+
+
+### Features
+
+* **cli:** honour NO_COLOR and FORCE_COLOR ([6646790](https://github.com/SimAin/gh-plate/commit/664679010de05c672fd6958a1d5e8149a82b7522))
+* **cli:** honour NO_COLOR; survive cp1252 consoles, Ctrl-C and closed pipes ([1dffdf6](https://github.com/SimAin/gh-plate/commit/1dffdf6d270458fe8acd00a8e189bf3bba4d2e0a))
+* **issues:** group counts in terminal dividers, matching prs ([1e8ffb7](https://github.com/SimAin/gh-plate/commit/1e8ffb7fdf27e6d110d87d37e298bbdf899d25ac))
+* **issues:** show group counts in dividers and markdown headings ([5a911c9](https://github.com/SimAin/gh-plate/commit/5a911c93b8f985149c68aee847c07116d8947150)), closes [#94](https://github.com/SimAin/gh-plate/issues/94)
+* **packaging:** rename distribution to gh-plate and fill project metadata ([93d2467](https://github.com/SimAin/gh-plate/commit/93d24678a834e9d4820f976e2c33a491d5824566))
+* **packaging:** rename distribution to gh-plate and fill project metadata ([3865440](https://github.com/SimAin/gh-plate/commit/38654404078de4202d6d9374b1926eeaa537afa5))
+
+
+### Bug Fixes
+
+* **cli:** address review — UTF-8 output, FORCE_COLOR=0, fd leak, real tests ([ce0c54f](https://github.com/SimAin/gh-plate/commit/ce0c54fbddbaf0f4479645a3fb87f7469d3b5a4b))
+* **cli:** exit cleanly on Ctrl-C and closed pipes ([d33f71e](https://github.com/SimAin/gh-plate/commit/d33f71ea823481cb234fdfb7ac6e2ae318f9b80f))
+* **cli:** mention plate retro in the bare-command hint ([3364d7f](https://github.com/SimAin/gh-plate/commit/3364d7f16512f0eed68f3eae3d1b5287dfbf7011))
+* **cli:** replace unencodable glyphs instead of crashing on cp1252 consoles ([3599fd2](https://github.com/SimAin/gh-plate/commit/3599fd258947ed0f043e78ca186eb664a36840a7))
+* **cli:** wrap the bare-command hint to the terminal width ([80fa95c](https://github.com/SimAin/gh-plate/commit/80fa95c2354691b1fa40c26831664becf34a1025))
+* **issues:** gate hyperlinks on a terminal, independent of colour ([a310692](https://github.com/SimAin/gh-plate/commit/a310692d28e82638fa829baba26beed6708a56b3))
+
+
+### Documentation
+
+* MIT licence, README for outside readers, drop MVP.md and SPRINT.md ([f1768b8](https://github.com/SimAin/gh-plate/commit/f1768b8ca84b794eade397e1390065829d9ca376))
+* **readme:** correct git requirement, lineage note, retro model row ([155bf15](https://github.com/SimAin/gh-plate/commit/155bf15d6dd469fbed4efd06c3e9f0faf13cb01f))
+* **readme:** reframe for outside readers ([dda59d8](https://github.com/SimAin/gh-plate/commit/dda59d8ef9c98522b1a7c40d43baea24f4374525))
+* remove MVP.md and SPRINT.md ([692578b](https://github.com/SimAin/gh-plate/commit/692578b64e3853e65ba3e45f82e40ac619c2b6cb))
+
 ## [1.5.0](https://github.com/SimAin/gh-plate/compare/v1.4.0...v1.5.0) (2026-08-12)
 
 
