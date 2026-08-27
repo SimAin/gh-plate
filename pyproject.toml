@@ -1,8 +1,10 @@
 [project]
 name = "plate"
 dynamic = ["version"]
-description = "Terminal status table for open GitHub issues assigned to you."
+description = "Compact terminal status tables for your GitHub issues, pull requests, and activity."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = []
 

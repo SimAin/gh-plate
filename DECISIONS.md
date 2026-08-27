@@ -1,7 +1,7 @@
 # Decision log
 
-Design decisions for `plate` (formerly `issue-check`), with the reasoning behind each. Recorded during
-the planning exploration; see `MVP.md` for the slice that shipped.
+Design decisions for `plate`, with the reasoning behind each. Most were recorded during
+the planning exploration that preceded each view; the README describes what shipped.
 
 ---
 
@@ -115,8 +115,7 @@ state filter). This mirrors D4's "let the API do the work" stance.
 `sprint_markdown` reuse the existing primitives; `config` parses the `repos` block and
 project URLs. A board can span repos, so items are filtered to the requested repo
 client-side, and PR/draft board items are dropped (issue-centric view). The Assignee
-column — cut from the default view as all-"me" (see `MVP.md`) — returns here as signal.
-See `SPRINT.md` for the built slice.
+column — cut from the default view as all-"me" — returns here as signal.
 
 ---
 
