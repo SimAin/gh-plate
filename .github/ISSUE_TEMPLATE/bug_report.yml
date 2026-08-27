@@ -14,10 +14,10 @@ body:
     id: what
     attributes:
       label: What happened, and what you expected
-      description: Paste output in a code block. `--color never` gives clean text; `--format markdown` where it applies.
+      description: Paste output in a code block. `--color never` avoids colour codes; `--format markdown` where it applies.
     validations:
       required: true
-  - type: input
+  - type: textarea
     id: version
     attributes:
       label: Versions

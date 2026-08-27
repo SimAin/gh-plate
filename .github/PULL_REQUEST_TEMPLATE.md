@@ -18,8 +18,8 @@
 <!-- Exact commands and what they prove. For fixes, what fails without this
      change. End with what was NOT verified, or "Nothing outstanding." -->
 
-- `uv run pytest -q` →
-- `uv run ruff check && uv run ruff format --check && uv run mypy` →
+- `uv run pytest -q` → _(paste the summary line)_
+- `uv run ruff check && uv run ruff format --check && uv run mypy` → _(paste the results)_
 
 ## Review guide
 

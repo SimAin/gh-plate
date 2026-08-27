@@ -50,8 +50,9 @@ way — a new test that needs a real token will be asked to change.
   (`Closes #N`). The PR template asks what changed, what deliberately
   didn't, and how you verified it — fill it in honestly; "not verified" is a
   fine answer.
-- **Comments say why, not what**, and stay short. No issue numbers in code —
-  put the reasoning in the commit or in `DECISIONS.md`.
+- **Comments say why, not what**, and stay short. Don't add issue numbers to
+  new code (the existing ones are legacy) — put the reasoning in the commit
+  message or in `DECISIONS.md`.
 - **Public-facing text is British English** (`colour`, `licence`).
 
 ## Architecture
