@@ -251,9 +251,11 @@ def terminal_tree(
     ]
     total = sum(w for _, w, _ in columns) + 2 * (len(columns) - 1)
     header = "  ".join(format_cell(n, w, a) for n, w, a in columns)
-    lines = [bold(header, use_color), divider("yours", total, use_color)]
+    nodes = flatten(forest)
+    owned = sum(1 for node in nodes if not node.row.context)
+    lines = [bold(header, use_color), divider(f"yours ({owned})", total, use_color)]
 
-    for node in flatten(forest):
+    for node in nodes:
         row = node.row
         if not row.context:
             age_text = format_age(row.age_days)
@@ -464,7 +466,7 @@ def sprint_table(
         ("others", view.others),
         ("unassigned", view.unassigned),
     ):
-        lines.append(divider(name, total, use_color))
+        lines.append(divider(f"{name} ({len(rows)})", total, use_color))
         for row in rows:
             lines.append(_sprint_row_line(row, columns, use_color, resolver))
 
@@ -483,7 +485,7 @@ def sprint_markdown(
         ("others", view.others),
         ("unassigned", view.unassigned),
     ):
-        lines.append(f"### {name}")
+        lines.append(f"### {name} ({len(rows)})")
         if not rows:
             lines.append("- *none*")
         for row in rows:

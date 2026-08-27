@@ -239,7 +239,7 @@ def test_visible_length_ignores_nested_link_and_color() -> None:
 def test_terminal_tree_no_color_structure() -> None:
     out = render.terminal_tree(sample_forest(), use_color=False)
     assert "\033[" not in out                 # no ANSI when colour off
-    assert "── yours ──" in out
+    assert "── yours (2) ──" in out            # counts owned rows, not the context epic
     # un-owned epic marked · with blank health+PR columns before the number
     assert render.CONTEXT_GLYPH + "   #10" in out
     assert "•" in out                          # stale owned child
@@ -401,7 +401,7 @@ def test_strip_emoji_keeps_words() -> None:
 def test_sprint_table_has_title_and_three_dividers() -> None:
     out = render.sprint_table(_view(), use_color=False)
     assert "Sprint 7  ·  current sprint" in out
-    for label in ("── yours", "── others", "── unassigned"):
+    for label in ("── yours (1)", "── others (1)", "── unassigned (1)"):
         assert label in out
     # title divider precedes the yours divider
     assert out.index("current sprint") < out.index("── yours")
@@ -454,7 +454,8 @@ def test_sprint_table_others_row_colour_label_not_promoted() -> None:
 def test_sprint_markdown_sections_and_emoji_kept() -> None:
     out = render.sprint_markdown(_view())
     assert "## Sprint 7 · current sprint" in out
-    assert "### yours" in out and "### others" in out and "### unassigned" in out
+    assert "### yours (1)" in out and "### others (1)" in out
+    assert "### unassigned (1)" in out
     assert "[#3](https://github.com/an-org/a-repo/issues/3)" in out
     assert "@a-teammate" in out
     assert "🚀 Shipping" in out             # markdown keeps the emoji
@@ -465,7 +466,7 @@ def test_sprint_markdown_marks_empty_bucket() -> None:
     view = SprintView(title="S", yours=[], others=[], unassigned=[
         make_sprint_row(1, is_unassigned=True)])
     out = render.sprint_markdown(view)
-    assert "### yours\n- *none*" in out
+    assert "### yours (0)\n- *none*" in out
 
 
 def test_sprint_key_names_bucket_order_and_others_glyph() -> None:
