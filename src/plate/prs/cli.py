@@ -35,9 +35,7 @@ DEFAULT_STALE_DAYS = 14
 def _positive_int(value: str) -> int:
     parsed = int(value)
     if parsed < 1:
-        raise argparse.ArgumentTypeError(
-            f"must be a positive integer, got '{value}'"
-        )
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got '{value}'")
     return parsed
 
 
@@ -112,9 +110,7 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
 
 def _use_color(args: argparse.Namespace) -> bool:
-    return args.color == "always" or (
-        args.color == "auto" and sys.stdout.isatty()
-    )
+    return args.color == "always" or (args.color == "auto" and sys.stdout.isatty())
 
 
 def run(args: argparse.Namespace) -> int:
@@ -230,9 +226,7 @@ def _run_owner(args: argparse.Namespace) -> int:
             print(f"No open PRs found for {display}.")
         return 0
 
-    rows = normalize_rows(
-        prs, login, now=datetime.now(UTC), stale_days=args.stale_days
-    )
+    rows = normalize_rows(prs, login, now=datetime.now(UTC), stale_days=args.stale_days)
     sections = group_by_repo(rows)
 
     if args.format == "markdown":

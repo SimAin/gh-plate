@@ -26,7 +26,7 @@ def _isolated_config_env(tmp_path, monkeypatch):
 def test_defaults_when_no_file(tmp_path) -> None:
     missing = tmp_path / "nope.json"
     cfg = config.load_config(str(missing))
-    assert cfg.style_for("blocked") == "alert"   # built-in default
+    assert cfg.style_for("blocked") == "alert"  # built-in default
     assert cfg.style_for("whatever") is None
 
 
@@ -35,7 +35,7 @@ def test_user_file_merges_over_defaults(tmp_path) -> None:
     path.write_text(json.dumps({"labels": {"needs-info": "warn", "blocked": "hide"}}))
     cfg = config.load_config(str(path))
     assert cfg.style_for("needs-info") == "warn"
-    assert cfg.style_for("blocked") == "hide"     # user overrides the default
+    assert cfg.style_for("blocked") == "hide"  # user overrides the default
 
 
 def test_style_for_is_case_insensitive(tmp_path) -> None:
@@ -108,9 +108,7 @@ def test_valid_config_produces_no_stderr(tmp_path, capsys) -> None:
 
 def test_unknown_keys_never_raise(tmp_path) -> None:
     path = tmp_path / "config.json"
-    path.write_text(
-        json.dumps({"totally-unknown": 42, "labels": {"blocked": "alert"}})
-    )
+    path.write_text(json.dumps({"totally-unknown": 42, "labels": {"blocked": "alert"}}))
     cfg = config.load_config(str(path))
     assert cfg.style_for("blocked") == "alert"
 
@@ -185,7 +183,7 @@ def test_repos_block_parses_with_defaults(tmp_path) -> None:
         "organization",
         2,
     )
-    assert project.sprint_field == "Iteration"   # GitHub defaults
+    assert project.sprint_field == "Iteration"  # GitHub defaults
     assert project.status_field == "Status"
     assert project.status_order == ()
     assert cfg.project_for("an-org/other-repo") is None

@@ -130,9 +130,7 @@ def _stub_owner(
 ) -> dict[str, Any]:
     """Wire the owner path's I/O to in-memory stubs; record fetch arguments."""
     calls: dict[str, Any] = {}
-    monkeypatch.setattr(
-        config, "load_config", lambda *a, **k: cfg or config.Config()
-    )
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: cfg or config.Config())
     monkeypatch.setattr(gh, "current_login", _boom_current_login)
     monkeypatch.setattr(gh, "current_repo", _boom_current_repo)
     monkeypatch.setattr(gh, "resolve_owner_type", lambda owner: owner_type)
@@ -224,9 +222,9 @@ def test_owner_empty_default_message(monkeypatch, capsys) -> None:
 
 def test_owner_empty_mine_message(monkeypatch, capsys) -> None:
     calls = _stub_owner(monkeypatch, issues=[], total=0)
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--owner", "an-org", "--mine"])
-    ) == 0
+    assert (
+        issues_cli.run(cli.parse_args(["issues", "--owner", "an-org", "--mine"])) == 0
+    )
     assert calls["assignee"] == "@me"
     assert "No open issues assigned to you for an-org." in capsys.readouterr().out
 
@@ -258,9 +256,10 @@ def test_owner_viewer_missing_with_empty_result_still_reports(
 def test_owner_truncation_note_limit_hit(monkeypatch, capsys) -> None:
     issues = [_issue(n) for n in range(1, 3)]
     _stub_owner(monkeypatch, issues=issues, total=5)
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--owner", "an-org", "--limit", "2"])
-    ) == 0
+    assert (
+        issues_cli.run(cli.parse_args(["issues", "--owner", "an-org", "--limit", "2"]))
+        == 0
+    )
     err = capsys.readouterr().err
     assert "showing 2 of 5 open issues for an-org (--limit 2)." in err
 
@@ -283,18 +282,24 @@ def test_owner_no_note_when_complete(monkeypatch, capsys) -> None:
 
 def test_owner_markdown_format(monkeypatch, capsys) -> None:
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--owner", "an-org", "--format", "markdown"])
-    ) == 0
+    assert (
+        issues_cli.run(
+            cli.parse_args(["issues", "--owner", "an-org", "--format", "markdown"])
+        )
+        == 0
+    )
     assert "## an-org/repo-a" in capsys.readouterr().out
 
 
 def test_owner_markdown_alias_shows_display_line(monkeypatch, capsys) -> None:
     cfg = config.Config(owners={"work": "company-org"})
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1, cfg=cfg)
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--owner", "work", "--format", "markdown"])
-    ) == 0
+    assert (
+        issues_cli.run(
+            cli.parse_args(["issues", "--owner", "work", "--format", "markdown"])
+        )
+        == 0
+    )
     out = capsys.readouterr().out
     assert "*work → company-org*" in out
     assert "## an-org/repo-a" in out
@@ -302,9 +307,10 @@ def test_owner_markdown_alias_shows_display_line(monkeypatch, capsys) -> None:
 
 def test_owner_show_key_prints_owner_key(monkeypatch, capsys) -> None:
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--owner", "an-org", "--show-key"])
-    ) == 0
+    assert (
+        issues_cli.run(cli.parse_args(["issues", "--owner", "an-org", "--show-key"]))
+        == 0
+    )
     out = capsys.readouterr().out
     assert "Key" in out
     assert "most recently active repo" in out
@@ -361,9 +367,7 @@ def test_yours_empty_prints_message(monkeypatch, capsys) -> None:
 
 def test_yours_markdown_format(monkeypatch, capsys) -> None:
     _stub_yours(monkeypatch, issues=[_issue(1)], total=1)
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--format", "markdown"])
-    ) == 0
+    assert issues_cli.run(cli.parse_args(["issues", "--format", "markdown"])) == 0
     out = capsys.readouterr().out
     assert "[#1](https://github.com/an-org/repo-a/issues/1)" in out
     assert "Issue 1" in out
@@ -496,9 +500,10 @@ def test_sprint_renders_table_with_items(monkeypatch, capsys) -> None:
 
 def test_sprint_markdown_format(monkeypatch, capsys) -> None:
     _stub_sprint(monkeypatch, viewer="me", items=[_sprint_item(1)])
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--sprint", "--format", "markdown"])
-    ) == 0
+    assert (
+        issues_cli.run(cli.parse_args(["issues", "--sprint", "--format", "markdown"]))
+        == 0
+    )
     out = capsys.readouterr().out
     assert "## Sprint 7 · current sprint" in out
     assert "[#1](https://github.com/an-org/a-repo/issues/1)" in out
@@ -506,9 +511,7 @@ def test_sprint_markdown_format(monkeypatch, capsys) -> None:
 
 def test_sprint_show_key_prints_sprint_key(monkeypatch, capsys) -> None:
     _stub_sprint(monkeypatch, viewer="me", items=[_sprint_item(1)])
-    assert issues_cli.run(
-        cli.parse_args(["issues", "--sprint", "--show-key"])
-    ) == 0
+    assert issues_cli.run(cli.parse_args(["issues", "--sprint", "--show-key"])) == 0
     out = capsys.readouterr().out
     assert "Key" in out
     assert "someone else's / unassigned row" in out

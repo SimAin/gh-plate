@@ -109,9 +109,7 @@ def _search_issues(
     for why this can exceed what pagination ever delivers — and ``viewer`` is
     the authenticated login from the document's ``viewer { login }`` root.
     """
-    return gh.search_paginated_with_viewer(
-        ISSUE_QUERY, query_str, limit, error_context
-    )
+    return gh.search_paginated_with_viewer(ISSUE_QUERY, query_str, limit, error_context)
 
 
 def fetch_assigned_issues(
@@ -154,9 +152,7 @@ def owner_search_query(
     else (D1, D6).
     """
     qualifier = "org" if owner_type == "organization" else "user"
-    query_str = (
-        f"{qualifier}:{owner} is:issue is:open archived:false sort:updated-desc"
-    )
+    query_str = f"{qualifier}:{owner} is:issue is:open archived:false sort:updated-desc"
     if assignee:
         query_str += f" assignee:{assignee}"
     return query_str
@@ -295,9 +291,13 @@ def fetch_sprint_items(
 
     while True:
         args = [
-            "gh", "api", "graphql",
-            "-f", f"query={query_str}",
-            "-f", f"q={q}",
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            f"query={query_str}",
+            "-f",
+            f"q={q}",
         ]
         if cursor:
             args += ["-f", f"endCursor={cursor}"]
@@ -305,8 +305,7 @@ def fetch_sprint_items(
         result = gh.run_command(args)
         if result.returncode != 0:
             raise gh.PlateError(
-                f"gh failed to fetch project {owner}/{number}:\n"
-                f"{result.stderr.strip()}"
+                f"gh failed to fetch project {owner}/{number}:\n{result.stderr.strip()}"
             )
         try:
             payload = json.loads(result.stdout)

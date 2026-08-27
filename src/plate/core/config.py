@@ -237,18 +237,14 @@ def parse_config(data: Any) -> Config:
     projects: dict[str, ProjectConfig] = {}
     repos = data.get("repos", {})
     if not isinstance(repos, dict):
-        raise PlateError(
-            'Config "repos" must be an object of OWNER/REPO -> settings.'
-        )
+        raise PlateError('Config "repos" must be an object of OWNER/REPO -> settings.')
     for repo, settings in repos.items():
         projects[str(repo).strip().lower()] = _parse_repo_settings(repo, settings)
 
     owners: dict[str, str] = {}
     raw_owners = data.get("owners", {})
     if not isinstance(raw_owners, dict):
-        raise PlateError(
-            'Config "owners" must be an object of alias -> owner name.'
-        )
+        raise PlateError('Config "owners" must be an object of alias -> owner name.')
     for alias, owner in raw_owners.items():
         if not isinstance(alias, str) or not alias.strip():
             raise PlateError(

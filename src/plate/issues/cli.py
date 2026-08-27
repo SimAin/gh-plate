@@ -32,9 +32,7 @@ DEFAULT_STALE_DAYS = 14
 def _positive_int(value: str) -> int:
     parsed = int(value)
     if parsed < 1:
-        raise argparse.ArgumentTypeError(
-            f"must be a positive integer, got '{value}'"
-        )
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got '{value}'")
     return parsed
 
 
@@ -117,9 +115,7 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
 
 def _use_color(args: argparse.Namespace) -> bool:
-    return args.color == "always" or (
-        args.color == "auto" and sys.stdout.isatty()
-    )
+    return args.color == "always" or (args.color == "auto" and sys.stdout.isatty())
 
 
 def _require_login(viewer: str | None) -> str:
@@ -213,9 +209,7 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
             aliases = ", ".join(
                 f"{alias} → {owner}" for alias, owner in cfg.owners.items()
             )
-            raise PlateError(
-                f"{exc}\nConfigured aliases: {aliases}"
-            ) from exc
+            raise PlateError(f"{exc}\nConfigured aliases: {aliases}") from exc
         raise
 
     issues, total, viewer = github.fetch_owner_issues(
@@ -276,7 +270,7 @@ def _run_sprint(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
     if project is None:
         raise PlateError(
             f"No sprint board configured for {repo}.\n"
-            "Add a \"repos\" entry mapping it to a GitHub project board in your "
+            'Add a "repos" entry mapping it to a GitHub project board in your '
             f"config ({args.config or config.config_path()}). See the README."
         )
 

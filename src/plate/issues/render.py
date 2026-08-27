@@ -74,6 +74,7 @@ LABEL_STYLE_COLORS = {"alert": SOFT_ROSE, "warn": SOFT_GOLD, "info": SOFT_GREEN}
 def _no_style(_label: str) -> str | None:
     return None
 
+
 # Linked-PR markers — a second glyph beside the health glyph, each a single
 # terminal column (no wide glyphs, so the tree cell stays aligned). The "in
 # flight" states share the ⇄ glyph (draft = dimmed, matching how GitHub greys
@@ -82,10 +83,10 @@ def _no_style(_label: str) -> str | None:
 # use of colour beyond health — the linked-PR state is worth a glance of colour.
 #   value: (glyph, colour | None, dim?)
 PR_GLYPHS = {
-    PR_OPEN: ("⇄", None, False),        # open PR — a fix is in flight
-    PR_DRAFT: ("⇄", None, True),        # draft PR — work in progress (dimmed)
+    PR_OPEN: ("⇄", None, False),  # open PR — a fix is in flight
+    PR_DRAFT: ("⇄", None, True),  # draft PR — work in progress (dimmed)
     PR_MERGED: ("⇄", SOFT_GREEN, False),  # merged, yet the issue is still open
-    PR_CLOSED: ("✗", SOFT_ROSE, False),   # closed unmerged — an abandoned attempt
+    PR_CLOSED: ("✗", SOFT_ROSE, False),  # closed unmerged — an abandoned attempt
 }
 PR_LABELS = {
     PR_OPEN: "open PR",
@@ -162,7 +163,7 @@ def format_labels(
     resolve = resolver or _no_style
     sep = " · "
     specials: list[str] = []  # already-coloured chunks, shown bright
-    specials_w = 0            # their combined visible width (incl. separators)
+    specials_w = 0  # their combined visible width (incl. separators)
     normals: list[str] = []
     for name in labels:
         style = resolve(name)
@@ -184,14 +185,13 @@ def format_labels(
 
     normals_plain = _pack_labels(normals, remaining, hidden) if remaining > 0 else ""
     parts = [
-        part
-        for part in (sep.join(specials), dim(normals_plain, use_color))
-        if part
+        part for part in (sep.join(specials), dim(normals_plain, use_color)) if part
     ]
     return sep.join(parts)
 
 
 # --- terminal tree -----------------------------------------------------------
+
 
 def _tree_width(term: int) -> int:
     fixed = AGE_W + LABELS_W + PROG_W + CMT_W
@@ -287,6 +287,7 @@ def terminal_tree(
 
 # --- markdown tree (nested list — the natural shape for a hierarchy) ---------
 
+
 def _markdown_row(
     node: TreeNode,
     resolver: Callable[[str], str | None] | None,
@@ -343,8 +344,7 @@ def markdown_tree(
     resolver: Callable[[str], str | None] | None = None,
 ) -> str:
     return "\n".join(
-        _markdown_row(node, resolver, assignee_meta=False)
-        for node in flatten(forest)
+        _markdown_row(node, resolver, assignee_meta=False) for node in flatten(forest)
     )
 
 
@@ -355,6 +355,7 @@ def markdown_tree(
 # and Status columns added. ``yours`` rows are full-weight with a health glyph +
 # PR marker; ``others``/``unassigned`` are dimmed whole — the weight-is-attention
 # axis again. Each bucket is pre-sorted active-first by the model.
+
 
 def _sprint_issue_width(term: int) -> int:
     fixed = AGE_W + ASSIGNEE_W + STATUS_W + SPRINT_LABELS_W + PROG_W + CMT_W
@@ -428,11 +429,17 @@ def _sprint_row_line(
         labels = format_labels(
             row.labels, SPRINT_LABELS_W, use_color, resolver, row.labels_hidden
         )
-        values = [issue, age, assignee, status, labels,
-                  dim(prog, use_color), dim(cmt, use_color)]
+        values = [
+            issue,
+            age,
+            assignee,
+            status,
+            labels,
+            dim(prog, use_color),
+            dim(cmt, use_color),
+        ]
         return "  ".join(
-            format_cell(v, w, a)
-            for v, (_, w, a) in zip(values, columns, strict=True)
+            format_cell(v, w, a) for v, (_, w, a) in zip(values, columns, strict=True)
         )
 
     # others / unassigned: same data, plain, then dimmed whole. The resolver's
@@ -440,12 +447,17 @@ def _sprint_row_line(
     # is not, so these rows stay uniformly dim.
     resolve = resolver or _no_style
     visible_labels = [name for name in row.labels if resolve(name) != "hide"]
-    values = [issue, age_text, assignee, status,
-              _pack_labels(visible_labels, SPRINT_LABELS_W, row.labels_hidden),
-              prog, cmt]
+    values = [
+        issue,
+        age_text,
+        assignee,
+        status,
+        _pack_labels(visible_labels, SPRINT_LABELS_W, row.labels_hidden),
+        prog,
+        cmt,
+    ]
     line = "  ".join(
-        format_cell(v, w, a)
-        for v, (_, w, a) in zip(values, columns, strict=True)
+        format_cell(v, w, a) for v, (_, w, a) in zip(values, columns, strict=True)
     )
     return dim(line, use_color)
 
@@ -534,6 +546,7 @@ def sprint_markdown(
 # whole (weight-is-attention, as in the sprint view), context structure-only.
 # Columns mirror the sprint view (Assignee returns as signal), minus Status.
 
+
 def _owner_issue_width(term: int) -> int:
     fixed = AGE_W + ASSIGNEE_W + SPRINT_LABELS_W + PROG_W + CMT_W
     separators = 2 * 5  # six columns, five gaps
@@ -616,19 +629,23 @@ def _owner_row_line(
         labels = format_labels(
             row.labels, SPRINT_LABELS_W, use_color, resolver, row.labels_hidden
         )
-        values = [issue, age, assignee, labels,
-                  dim(prog, use_color), dim(str(row.comments_count), use_color)]
+        values = [
+            issue,
+            age,
+            assignee,
+            labels,
+            dim(prog, use_color),
+            dim(str(row.comments_count), use_color),
+        ]
         return "  ".join(
-            format_cell(v, w, a)
-            for v, (_, w, a) in zip(values, columns, strict=True)
+            format_cell(v, w, a) for v, (_, w, a) in zip(values, columns, strict=True)
         )
 
     if cls == ROW_CONTEXT:
         # structural ancestor: number+title + rollup only, then dimmed whole.
         values = [issue, "", "", "", prog, ""]
         line = "  ".join(
-            format_cell(v, w, a)
-            for v, (_, w, a) in zip(values, columns, strict=True)
+            format_cell(v, w, a) for v, (_, w, a) in zip(values, columns, strict=True)
         )
         return dim(line, use_color)
 
@@ -637,12 +654,16 @@ def _owner_row_line(
     resolve = resolver or _no_style
     assignee = row.assignees[0] if row.assignees else "—"
     visible_labels = [name for name in row.labels if resolve(name) != "hide"]
-    values = [issue, age_text, assignee,
-              _pack_labels(visible_labels, SPRINT_LABELS_W, row.labels_hidden),
-              prog, str(row.comments_count)]
+    values = [
+        issue,
+        age_text,
+        assignee,
+        _pack_labels(visible_labels, SPRINT_LABELS_W, row.labels_hidden),
+        prog,
+        str(row.comments_count),
+    ]
     line = "  ".join(
-        format_cell(v, w, a)
-        for v, (_, w, a) in zip(values, columns, strict=True)
+        format_cell(v, w, a) for v, (_, w, a) in zip(values, columns, strict=True)
     )
     return dim(line, use_color)
 
@@ -696,6 +717,7 @@ def owner_markdown(
 
 # --- key ---------------------------------------------------------------------
 
+
 def symbol_key(use_color: bool) -> str:
     states = "   ".join(
         f"{colorize(STATE_GLYPHS[s][0], STATE_GLYPHS[s][1], use_color)} "
@@ -743,7 +765,8 @@ def sprint_key(use_color: bool) -> str:
     return "\n".join(
         [
             bold("Key", use_color),
-            "  State   " + states
+            "  State   "
+            + states
             + f"   {CONTEXT_GLYPH} someone else's / unassigned row (dimmed)",
             "  PR      " + prs + "   (yours rows only)",
             dim(
@@ -779,7 +802,8 @@ def owner_key(use_color: bool) -> str:
     return "\n".join(
         [
             bold("Key", use_color),
-            "  State   " + states
+            "  State   "
+            + states
             + f"   {CONTEXT_GLYPH} someone else's issue (dimmed) / "
             "parent shown for structure",
             "  PR      " + prs,

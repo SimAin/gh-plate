@@ -580,9 +580,8 @@ def test_owner_table_keeps_mine_and_to_review_full_weight() -> None:
 
 def test_owner_table_rows_keep_section_fetch_order() -> None:
     lines = render.owner_table(owner_sections(), use_color=False).splitlines()
-    assert (
-        next(i for i, line in enumerate(lines) if "Mine here" in line)
-        < next(i for i, line in enumerate(lines) if "Review me" in line)
+    assert next(i for i, line in enumerate(lines) if "Mine here" in line) < next(
+        i for i, line in enumerate(lines) if "Review me" in line
     )
 
 

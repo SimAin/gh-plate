@@ -160,9 +160,7 @@ def test_compare_dedupes_shas_across_branches() -> None:
 
 
 def test_failed_compare_falls_back_to_one_commit_per_push() -> None:
-    refs, unexpanded = model.commits_from_compares(
-        [_group([0, 3])], [None], "simon"
-    )
+    refs, unexpanded = model.commits_from_compares([_group([0, 3])], [None], "simon")
     assert refs == [("acme", _iso(0)), ("acme", _iso(3))]
     assert unexpanded == 2
     note = model.unexpanded_note(unexpanded)
@@ -232,9 +230,7 @@ def test_activity_outside_the_window_is_dropped() -> None:
 
 
 def test_last_days_edges() -> None:
-    labelled = one_owner(
-        events=[review(0)], commits=[commit_ref(5), commit_ref(9)]
-    )
+    labelled = one_owner(events=[review(0)], commits=[commit_ref(5), commit_ref(9)])
     assert labelled["reviews"].last_days == 0
     assert labelled["commits"].last_days == 5
     assert labelled["opened"].last_days is None

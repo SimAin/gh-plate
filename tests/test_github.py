@@ -78,7 +78,7 @@ def test_sprint_query_uses_org_root_and_interpolates_fields() -> None:
     assert "projectV2(number: 2)" in query
     assert 'fieldValueByName(name: "Status")' in query
     assert 'fieldValueByName(name: "Iteration")' in query
-    assert 'query: $q' in query
+    assert "query: $q" in query
 
 
 def test_sprint_query_requests_viewer_login() -> None:
@@ -282,9 +282,7 @@ def test_owner_search_query_no_assignee_omits_filter() -> None:
 # --- resolve_owner_type -------------------------------------------------------
 
 
-def _fake_run_with_stdout(
-    stdout: str, returncode: int = 0
-) -> Any:
+def _fake_run_with_stdout(stdout: str, returncode: int = 0) -> Any:
     def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             args, returncode, stdout=stdout, stderr="" if returncode == 0 else stdout
@@ -341,24 +339,26 @@ def test_repo_from_remote_non_github_host_falls_back_to_gh(
 
     def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
         captured["args"] = args
-        return subprocess.CompletedProcess(
-            args, 0, stdout="an-org/a-repo\n", stderr=""
-        )
+        return subprocess.CompletedProcess(args, 0, stdout="an-org/a-repo\n", stderr="")
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     repo = gh.repo_from_remote("git@git.example.com:an-org/a-repo.git")
     assert repo == "an-org/a-repo"
     assert captured["args"] == [
-        "gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"
+        "gh",
+        "repo",
+        "view",
+        "--json",
+        "nameWithOwner",
+        "--jq",
+        ".nameWithOwner",
     ]
 
 
 def test_repo_from_remote_fallback_failure_returns_none(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        gh, "run_command", _fake_run_with_stdout("boom", returncode=1)
-    )
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout("boom", returncode=1))
     assert gh.repo_from_remote("git@git.example.com:x/y.git") is None
 
 
@@ -947,9 +947,7 @@ def test_fetch_sprint_items_caps_runaway_pagination(
 def test_fetch_sprint_items_gh_failure_raises_with_project(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        gh, "run_command", _fake_run_with_stdout("boom", returncode=1)
-    )
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout("boom", returncode=1))
     with pytest.raises(gh.PlateError) as excinfo:
         github.fetch_sprint_items("acme", "organization", 2, "Iteration", "Status")
     message = str(excinfo.value)
@@ -1030,9 +1028,7 @@ def test_fetch_project_fields_other_graphql_error_raises_generic_dump(
 def test_fetch_project_fields_gh_failure_raises_with_project(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        gh, "run_command", _fake_run_with_stdout("boom", returncode=1)
-    )
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout("boom", returncode=1))
     with pytest.raises(gh.PlateError) as excinfo:
         github.fetch_project_fields("acme", "organization", 2)
     message = str(excinfo.value)

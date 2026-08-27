@@ -550,7 +550,9 @@ def test_group_by_repo_sections_in_first_appearance_order() -> None:
     )
     sections = model.group_by_repo(rows)
     assert [repo for repo, _ in sections] == [
-        "acme/repo-b", "acme/repo-a", "acme/repo-c"
+        "acme/repo-b",
+        "acme/repo-a",
+        "acme/repo-c",
     ]
 
 
@@ -633,9 +635,7 @@ def test_timeline_window_edges() -> None:
     too_old = buckets([commit_event(_iso(NOW, model.TIMELINE_DAYS), "alice")])
     assert too_old is not None
     assert all(event is None for event in too_old)
-    oldest_kept = buckets(
-        [commit_event(_iso(NOW, model.TIMELINE_DAYS - 1), "alice")]
-    )
+    oldest_kept = buckets([commit_event(_iso(NOW, model.TIMELINE_DAYS - 1), "alice")])
     assert oldest_kept is not None
     assert oldest_kept[0] is not None
 
