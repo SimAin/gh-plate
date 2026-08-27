@@ -30,6 +30,7 @@ def test_bare_plate_prints_help_and_hint(capsys) -> None:
     out = capsys.readouterr().out
     assert "plate issues" in out
     assert "plate prs" in out
+    assert "plate retro" in out
     assert "Hint:" in out
 
 

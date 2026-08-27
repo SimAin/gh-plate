@@ -73,11 +73,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     if args.command is None:
-        # Bare `plate`: show the top-level help and point at both views.
+        # Bare `plate`: show the top-level help and point at the views.
         parser.print_help()
         print(
-            "\nHint: run `plate issues` to see the issues assigned to you, or "
-            "`plate prs` to see open pull requests."
+            "\nHint: run `plate issues` to see the issues assigned to you, "
+            "`plate prs` to see open pull requests, or `plate retro` for a "
+            "retrospective of your own activity."
         )
         return 0
     try:
