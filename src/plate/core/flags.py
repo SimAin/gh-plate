@@ -17,9 +17,10 @@ def output() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
         "--format",
-        choices=("terminal", "markdown"),
+        choices=("terminal", "markdown", "json"),
         default="terminal",
-        help="Output format. Defaults to terminal.",
+        help="Output format. Defaults to terminal. json is a stable envelope "
+        "for scripts (see README).",
     )
     parser.add_argument(
         "--color",

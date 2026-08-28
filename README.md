@@ -218,8 +218,9 @@ changes requested, green = approved). Bot activity never appears, so a
 release-please or renovate PR shows an all-quiet strip. The row already says
 who moved last and how long ago (the Last column); the strip adds the shape —
 the rhythm and the silence. It needs event history, so the flag opts into a
-heavier query; it applies to the repo view's terminal format only (ignored
-with `--format markdown`, rejected with `--owner`).
+heavier query; it applies to the repo view only (rejected with `--owner`) and
+is ignored with `--format markdown` — `--format json` carries the strip as
+data.
 
 In terminals that support OSC 8 hyperlinks (iTerm2, Kitty, WezTerm, VS Code,
 and most modern emulators), the PR number is clickable and opens the PR on
@@ -429,6 +430,62 @@ alias to get the literal back.
 - **`--limit` is global** across the whole owner (not per repo). Results are
   sorted most-recently-active first, so truncating by `--limit` keeps the issues
   that were touched most recently; a truncation note reports the count.
+
+## Machine-readable output (`--format json`)
+
+Every view takes `--format json` and prints one JSON object to stdout — the
+same data the table shows, for scripts: a cron job that nudges you about stale
+work, a status-bar widget with your stale count, a day-over-day diff of the
+sprint.
+
+```sh
+plate issues --format json | jq '.data.issues[] | select(.is_stale) | .number'
+plate prs --owner my-org --format json | jq '.data.summary'
+plate retro --days 7 --format json | jq '.data.sections[] | {owner, total}'
+```
+
+The object is an envelope around the view's `data`; every key is always
+present, null when it doesn't apply to the view:
+
+```json
+{
+  "schema": 1,
+  "command": "issues",
+  "view": "assigned",
+  "generated_at": "2026-08-28T10:40:00Z",
+  "repo": "acme/widget",
+  "owner": null,
+  "login": "octocat",
+  "assignee": "octocat",
+  "sprint": null,
+  "stale_days": 14,
+  "notes": [],
+  "data": { "issues": [ { "number": 12, "title": "…", "depth": 0, "..." : "…" } ] }
+}
+```
+
+- `view` is `assigned` / `owner` / `sprint` for `issues`, `repo` / `owner` for
+  `prs`, `retro` for `retro`. `assignee` is the assignee filter in force —
+  your login in the `issues` assigned view and `issues --owner --mine`, null
+  elsewhere (`prs --mine` filters by author, not assignee) and null if your
+  login could not be determined; `sprint` is `{"title": …}` for the sprint
+  view (`null` title when there is no active sprint).
+- `notes` holds the honesty notes the other formats print to stderr
+  (truncation, feed coverage, unexpanded pushes) — in this format they go
+  here and nowhere else, so a consumer of stdout sees them. Errors still go to
+  stderr with a non-zero exit; no JSON is printed then.
+- `data.issues` is a **flat list in display order**; each row carries `repo`,
+  `parent_number` and `depth`, which together rebuild the tree, plus a `group`
+  (`yours` / `others` / `unassigned`) in the sprint view. `data.prs` is the
+  rows in the table's order (yours, to review, the rest) with a `summary`
+  beside them. For `retro`, `data.days` is the window size and
+  `data.sections` is one entry per owner with its channels (`counts` oldest
+  → today).
+- An empty result is still an envelope with empty lists — check the exit code
+  and the array length, not stdout for a sentence.
+- Field names match the model's dataclasses and are meant to be stable:
+  `schema` is bumped only if an existing key changes meaning or disappears;
+  new keys may appear without a bump.
 
 ## Special labels (configuration)
 

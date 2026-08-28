@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import os
 import sys
 from datetime import UTC, datetime, timedelta
@@ -788,3 +789,133 @@ def test_color_enabled_resolution(monkeypatch, mode, env, tty, expected) -> None
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(render, "sys", SimpleNamespace(stdout=_Tty(tty)))
     assert render.color_enabled(mode) is expected
+
+
+# --- --format json ---------------------------------------------------------------
+
+
+def test_json_yours_view_emits_flat_rows_with_depth(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    parent = _issue(1)
+    child = {
+        **_issue(2),
+        "parent": {"number": 1, "repository": {"nameWithOwner": "an-org/repo-a"}},
+    }
+    _stub_yours(monkeypatch, issues=[parent, child], total=2)
+    args = cli.parse_args(["issues", "--format", "json", "--stale-days", "7"])
+    assert run_with_config(issues_cli.run, args) == 0
+    out, err = capsys.readouterr()
+    payload = json.loads(out)
+    assert (payload["command"], payload["view"]) == ("issues", "assigned")
+    assert payload["repo"] == "an-org/a-repo"
+    assert payload["login"] == payload["assignee"] == "me"
+    assert payload["sprint"] is None and payload["owner"] is None
+    assert payload["stale_days"] == 7
+    rows = payload["data"]["issues"]
+    assert [(row["number"], row["depth"]) for row in rows] == [(1, 0), (2, 1)]
+    assert rows[1]["parent_number"] == 1
+    assert rows[0]["title"] == "Issue 1" and rows[0]["is_stale"] is False
+    assert payload["notes"] == [] and err == ""
+
+
+def test_json_yours_view_moves_the_truncation_note_into_the_envelope(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    _stub_yours(monkeypatch, issues=[_issue(1)], total=9)
+    args = cli.parse_args(["issues", "--format", "json", "--limit", "1"])
+    assert run_with_config(issues_cli.run, args) == 0
+    out, err = capsys.readouterr()
+    assert json.loads(out)["notes"] == ["Note: showing 1 of 9 assigned issues."]
+    assert err == ""
+
+
+def test_json_yours_view_with_nothing_assigned_is_an_empty_envelope(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    _stub_yours(monkeypatch, issues=[], total=0)
+    assert (
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--format", "json"]))
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert json.loads(out)["data"] == {"issues": []}
+    assert "No open issues" not in out
+
+
+def test_json_owner_view_lists_rows_across_repos(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    _stub_owner(
+        monkeypatch,
+        issues=[_issue(1, repo="an-org/repo-a"), _issue(5, repo="an-org/repo-b")],
+        total=2,
+    )
+    args = cli.parse_args(["issues", "--owner", "an-org", "--mine", "--format", "json"])
+    assert run_with_config(issues_cli.run, args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["view"] == "owner"
+    assert payload["owner"] == "an-org" and payload["repo"] is None
+    assert payload["assignee"] == "me"  # --mine narrows to the viewer
+    assert sorted(row["repo"] for row in payload["data"]["issues"]) == [
+        "an-org/repo-a",
+        "an-org/repo-b",
+    ]
+    assert all("depth" in row for row in payload["data"]["issues"])
+
+
+def test_json_owner_view_without_mine_has_no_assignee_filter(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    _stub_owner(monkeypatch, issues=[_issue(1, assignees=("alice",))], total=1)
+    args = cli.parse_args(["issues", "--owner", "an-org", "--format", "json"])
+    assert run_with_config(issues_cli.run, args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["assignee"] is None
+    assert payload["data"]["issues"][0]["mine"] is False
+
+
+def test_json_sprint_view_groups_rows_and_names_the_sprint(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    _stub_sprint(
+        monkeypatch,
+        viewer="me",
+        items=[
+            _sprint_item(1),
+            _sprint_item(2, assignees=()),
+            _sprint_item(3, assignees=("alice",)),
+        ],
+    )
+    args = cli.parse_args(["issues", "--sprint", "--format", "json"])
+    assert run_with_config(issues_cli.run, args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["view"] == "sprint"
+    assert payload["sprint"] == {"title": "Sprint 7"}
+    groups = {row["number"]: row["group"] for row in payload["data"]["issues"]}
+    assert groups == {1: "yours", 2: "unassigned", 3: "others"}
+    assert payload["data"]["issues"][0]["status"] == "In progress"
+
+
+def test_json_sprint_view_with_no_active_sprint_has_a_null_title(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    _stub_sprint(monkeypatch, viewer="me")
+    args = cli.parse_args(["issues", "--sprint", "--format", "json"])
+    assert run_with_config(issues_cli.run, args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["sprint"] == {"title": None}
+    assert payload["data"] == {"issues": []}
+
+
+def test_json_owner_view_with_nothing_found_needs_no_login(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    # The other formats print a sentence without ever needing the viewer; the
+    # envelope must not be stricter on the same fetch.
+    _stub_owner(monkeypatch, issues=[], total=0, viewer=None)
+    args = cli.parse_args(["issues", "--owner", "an-org", "--format", "json"])
+    assert run_with_config(issues_cli.run, args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["login"] is None
+    assert payload["data"] == {"issues": []}

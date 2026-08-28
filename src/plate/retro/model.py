@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
 
-from plate.core.text import parse_timestamp
+from plate.core.text import format_timestamp, parse_timestamp
 
 DEFAULT_DAYS = 14
 MIN_DAYS = 7
@@ -100,9 +100,8 @@ def window_start(days: int, now: datetime) -> datetime:
 
 
 def api_timestamp(moment: datetime) -> str:
-    """``moment`` for a GitHub query string: ``Z``, not ``isoformat()``'s
-    ``+00:00`` — an unescaped ``+`` decodes as a space."""
-    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    """``moment`` for a GitHub query string (see :func:`format_timestamp`)."""
+    return format_timestamp(moment)
 
 
 def _owner_of(full_name: Any) -> str | None:

@@ -2,15 +2,17 @@
 strings turned into usable values.
 
 Not presentation — these run before anything is laid out, on the way in from a
-``gh`` payload. ``compact_text`` is re-exported from :mod:`plate.core.render`
-so its long-standing import path keeps working.
+``gh`` payload (``format_timestamp`` is the one exception: timestamps going
+back out, to a query string or the JSON envelope). ``compact_text`` is
+re-exported from :mod:`plate.core.render` so its long-standing import path
+keeps working.
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 # Well-formed escape sequences: CSI (ESC [ … final), OSC (ESC ] … ST), and the
@@ -47,3 +49,10 @@ def parse_timestamp(value: Any) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def format_timestamp(moment: datetime) -> str:
+    """``moment`` in GitHub's own form, ``2026-06-19T12:00:00Z``. ``Z``, not
+    ``isoformat()``'s ``+00:00``: an unescaped ``+`` in a query string decodes
+    as a space."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")

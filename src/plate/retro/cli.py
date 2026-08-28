@@ -11,7 +11,7 @@ import argparse
 import sys
 from datetime import UTC, datetime
 
-from plate.core import config, flags, gh
+from plate.core import config, flags, gh, jsonout
 from plate.core.gh import PlateError
 from plate.core.render import color_enabled
 
@@ -92,6 +92,28 @@ def run(args: argparse.Namespace, _cfg: config.Config) -> int:
     sections = build_sections(
         commit_refs, opened_items, closed_items, events, args.days, now
     )
+    notes = [
+        note
+        for note in (
+            truncation_note("PRs opened", len(opened_items), opened_total),
+            truncation_note("PRs closed", len(closed_items), closed_total),
+            coverage_note(events, args.days, now, github.EVENTS_FEED_CAP),
+            unexpanded_note(unexpanded),
+        )
+        if note
+    ]
+
+    if args.format == "json":
+        payload = jsonout.envelope(
+            command="retro",
+            view="retro",
+            now=now,
+            login=login,
+            notes=notes,
+            data={"days": args.days, "sections": sections},
+        )
+        print(jsonout.dumps(payload))
+        return 0
 
     if not sections:
         print(f"No activity found in the last {args.days} days.")
@@ -102,13 +124,6 @@ def run(args: argparse.Namespace, _cfg: config.Config) -> int:
     else:
         print(render.panel(sections, args.days, now, color_enabled(args.color)))
 
-    notes = [
-        truncation_note("PRs opened", len(opened_items), opened_total),
-        truncation_note("PRs closed", len(closed_items), closed_total),
-        coverage_note(events, args.days, now, github.EVENTS_FEED_CAP),
-        unexpanded_note(unexpanded),
-    ]
     for note in notes:
-        if note:
-            print(f"\n{note}", file=sys.stderr)
+        print(f"\n{note}", file=sys.stderr)
     return 0

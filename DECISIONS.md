@@ -447,6 +447,42 @@ split is deferred (issue #91's "Later" menu).
 
 ---
 
+## D15 — `--format json`: one envelope, flat rows, notes inside (issue #16)
+
+**Decision:** every view takes `--format json` and prints a single object:
+a shared **envelope** (`schema`, `command`, `view`, `generated_at`, `repo`,
+`owner`, `login`, `assignee`, `sprint`, `stale_days`, `notes`) around a
+per-view `data`. The envelope is built in `core/jsonout.py`; each domain's
+`cli` supplies `data` straight from its model dataclasses (`plain` turns them
+into dicts), so the JSON shape *is* the model — no second schema to keep in
+step. Every envelope key is always present (null when the scope doesn't
+apply), and `assignee`/`sprint` are there from day one so `--assignee` (#17)
+and sprint selection (#20) fill keys rather than add them.
+
+**Why flat rows, not the tree:** the issues views render a forest, but a
+script wants `jq '.data.issues[] | select(.is_stale)'`, not a recursive
+descent. Rows are emitted in **display order** with `depth`, and already carry
+`parent_number` and `repo`, so the hierarchy is recoverable without being
+imposed. The same one shape serves the assigned and owner views (sections
+collapse into the list; `repo` is on every row); the sprint view adds `group`.
+PR rows come in the table's yours / to-review / the-rest order beside the
+`summary`.
+
+**Why notes go in the envelope and not to stderr:** the honesty notes exist
+so a number is never silently approximate. A consumer of stdout never sees
+stderr, so in this format they travel as `notes` — and *only* there, to avoid
+double-reporting when a human runs it. Errors are unchanged: a message on
+stderr and a non-zero exit, no JSON.
+
+**Consequence & accepted limits:** an empty result is an envelope with empty
+lists, not a sentence — scripts check the exit code and the array length.
+`--timeline` is honoured in JSON (the strip is data); `--show-key` and
+`--color` are ignored. Row fields are the dataclass fields verbatim,
+including internal-looking ones (`original_index`); `schema` is bumped only
+when an existing key changes meaning or disappears, never for additions.
+
+---
+
 ## Standing decisions carried from the architecture discussion
 
 - **Standalone, not a shared package.** The GraphQL fetch layer is specific enough

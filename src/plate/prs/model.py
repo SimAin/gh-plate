@@ -557,3 +557,9 @@ def group_by_repo(rows: list[PrRow]) -> list[tuple[str, list[PrRow]]]:
     for row in rows:
         grouped.setdefault(row.repo, []).append(row)
     return list(grouped.items())
+
+
+def display_order(rows: list[PrRow]) -> list[PrRow]:
+    """Rows in the repo view's order — yours, then to review, then the rest —
+    so ``--format json`` lists them as the terminal table would."""
+    return sorted(rows, key=sort_key)

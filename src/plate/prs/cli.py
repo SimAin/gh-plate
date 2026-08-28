@@ -23,12 +23,12 @@ import argparse
 import sys
 from datetime import UTC, datetime
 
-from plate.core import config, flags, gh, owner
+from plate.core import config, flags, gh, jsonout, owner
 from plate.core.gh import PlateError
 from plate.core.render import color_enabled
 
 from . import github, render
-from .model import group_by_repo, normalize_rows, summary_counts
+from .model import display_order, group_by_repo, normalize_rows, summary_counts
 
 DEFAULT_LIMIT = 500
 DEFAULT_STALE_DAYS = 14
@@ -77,8 +77,7 @@ def _add_prs_flags(parser: argparse.ArgumentParser) -> None:
         "--timeline",
         action="store_true",
         help="Show a per-PR activity strip of the last 28 days under each "
-        "row (repo view, terminal format only; ignored with --format "
-        "markdown).",
+        "row (repo view; ignored with --format markdown).",
     )
     parser.add_argument(
         "--show-key",
@@ -123,17 +122,39 @@ def run(args: argparse.Namespace, cfg: config.Config) -> int:
 
 
 def _run_repo(args: argparse.Namespace, repo: str) -> int:
-    # The strip is terminal-only, so markdown never pays for the events fetch.
-    timeline = args.timeline and args.format == "terminal"
+    # Markdown has no strip, so it never pays for the events fetch.
+    timeline = args.timeline and args.format != "markdown"
     login, prs = github.fetch_prs_and_viewer(repo, args.limit, timeline=timeline)
+    now = datetime.now(UTC)
+    notes = []
+    if len(prs) == args.limit:
+        notes.append(
+            f"Note: fetched {args.limit} open PRs; there may be more not shown."
+        )
+    if prs and login is None:
+        notes.append(
+            "Note: current GitHub login could not be determined, so PRs could "
+            "not be grouped into yours / to review."
+        )
+    rows = normalize_rows(prs, login, now=now, stale_days=args.stale_days, repo=repo)
+
+    if args.format == "json":
+        payload = jsonout.envelope(
+            command="prs",
+            view="repo",
+            now=now,
+            login=login,
+            repo=repo,
+            stale_days=args.stale_days,
+            notes=notes,
+            data={"summary": summary_counts(rows), "prs": display_order(rows)},
+        )
+        print(jsonout.dumps(payload))
+        return 0
 
     if not prs:
         print(f"No open PRs found for {repo}.")
         return 0
-
-    rows = normalize_rows(
-        prs, login, now=datetime.now(UTC), stale_days=args.stale_days, repo=repo
-    )
 
     if args.format == "markdown":
         print(render.markdown_table(rows))
@@ -155,18 +176,8 @@ def _run_repo(args: argparse.Namespace, repo: str) -> int:
             )
         )
 
-    if len(prs) == args.limit:
-        print(
-            f"\nNote: fetched {args.limit} open PRs; there may be more not shown.",
-            file=sys.stderr,
-        )
-    if login is None:
-        print(
-            "\nNote: current GitHub login could not be determined, so PRs could "
-            "not be grouped into yours / to review.",
-            file=sys.stderr,
-        )
-
+    for note in notes:
+        print(f"\n{note}", file=sys.stderr)
     return 0
 
 
@@ -185,15 +196,37 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
     prs, total = github.fetch_owner_prs(
         target.name, target.owner_type, login, args.limit, mine=args.mine
     )
+    now = datetime.now(UTC)
+    note = owner.listing_truncation_note(
+        "open PRs", display, len(prs), total, args.limit
+    )
+    notes = [note] if note else []
+    rows = normalize_rows(prs, login, now=now, stale_days=args.stale_days)
+    sections = group_by_repo(rows)
+
+    if args.format == "json":
+        payload = jsonout.envelope(
+            command="prs",
+            view="owner",
+            now=now,
+            login=login,
+            owner=target.name,
+            stale_days=args.stale_days,
+            notes=notes,
+            data={
+                "summary": summary_counts(rows),
+                "prs": [row for _repo, repo_rows in sections for row in repo_rows],
+            },
+        )
+        print(jsonout.dumps(payload))
+        return 0
+
     if not prs:
         if args.mine:
             print(f"No open PRs authored by you for {display}.")
         else:
             print(f"No open PRs found for {display}.")
         return 0
-
-    rows = normalize_rows(prs, login, now=datetime.now(UTC), stale_days=args.stale_days)
-    sections = group_by_repo(rows)
 
     if args.format == "markdown":
         if target.alias_fired:
@@ -211,9 +244,6 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
         print()
         print(render.owner_table(sections, use_color, use_links=sys.stdout.isatty()))
 
-    note = owner.listing_truncation_note(
-        "open PRs", display, len(prs), total, args.limit
-    )
-    if note:
-        print(note, file=sys.stderr)
+    for note in notes:
+        print(f"\n{note}", file=sys.stderr)
     return 0
