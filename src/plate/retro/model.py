@@ -7,11 +7,12 @@ org and personal repositories read as separate sections; within each owner,
 four channels (reviews, commits, PRs opened, PRs closed) bucket into one
 count per UTC day over the window.
 
-Commits travel a two-step path: :func:`push_groups` chains the feed's push
-events per branch, the fetch layer compares each chain, and
-:func:`commits_from_compares` keeps your own commits (deduped by sha) with
-their real committer dates — so branch work counts the day it happened, not
-the day it merged.
+Commits travel a two-step path: :func:`push_groups` collects the branches the
+feed saw you touch (push events chained per branch, plus branch creations,
+which carry no push), the fetch layer compares each chain and lists each
+branch's recent commits, and :func:`collect_commits` unions both (deduped by
+sha) with their real committer dates — so branch work counts the day it
+happened, not the day it merged, and a push the feed dropped still counts.
 """
 
 from __future__ import annotations
@@ -51,22 +52,53 @@ class RetroSection:
     total: int
 
 
+BRANCH_REF_PREFIX = "refs/heads/"
+
+
 @dataclass(frozen=True)
 class PushGroup:
-    """One branch's pushes within the window, chained into a single
-    ``base...head`` range; ``push_stamps`` keeps each push's timestamp for
-    the can't-compare fallback."""
+    """One ref the feed saw you touch within the window. Its pushes chain
+    into a single ``base...head`` range (both None when the feed carried only
+    the branch's creation — that push emits no PushEvent); ``push_stamps``
+    keeps each push's timestamp for the can't-expand fallback."""
 
     repo: str
-    base: str
-    head: str
+    ref: str
+    base: str | None
+    head: str | None
     push_stamps: list[str]
+
+    @property
+    def compare_range(self) -> tuple[str, str, str] | None:
+        """``(repo, base, head)`` for the compare API, or None without pushes."""
+        if self.base is None or self.head is None:
+            return None
+        return (self.repo, self.base, self.head)
+
+    @property
+    def branch(self) -> str | None:
+        """The branch name for listing commits, or None for tags and other refs."""
+        if not self.ref.startswith(BRANCH_REF_PREFIX):
+            return None
+        return self.ref[len(BRANCH_REF_PREFIX) :]
+
+    @property
+    def listing_target(self) -> tuple[str, str] | None:
+        """``(repo, branch)`` for the commits listing, or None for non-branches."""
+        branch = self.branch
+        return None if branch is None else (self.repo, branch)
 
 
 def window_start(days: int, now: datetime) -> datetime:
     """The start of the window's oldest UTC day — today counts as day one."""
     oldest = now.astimezone(UTC).date() - timedelta(days=days - 1)
     return datetime.combine(oldest, time.min, tzinfo=UTC)
+
+
+def api_timestamp(moment: datetime) -> str:
+    """``moment`` for a GitHub query string: ``Z``, not ``isoformat()``'s
+    ``+00:00`` — an unescaped ``+`` decodes as a space."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _owner_of(full_name: Any) -> str | None:
@@ -79,73 +111,96 @@ def _owner_of(full_name: Any) -> str | None:
 # --- pushes -> commit refs -------------------------------------------------
 
 
+def _event_ref(event: dict[str, Any], start: datetime) -> tuple[str, str] | None:
+    """``(repo, full ref)`` for an in-window push or branch creation, else None.
+
+    A PushEvent names its ref in full (``refs/heads/NAME``); a CreateEvent
+    names the bare branch, so it is prefixed to share a key with its pushes.
+    """
+    kind = event.get("type")
+    if kind not in ("PushEvent", "CreateEvent"):
+        return None
+    stamp = parse_timestamp(event.get("created_at"))
+    if stamp is None or stamp < start:
+        return None
+    repo_block = event.get("repo")
+    repo = repo_block.get("name") if isinstance(repo_block, dict) else None
+    payload = event.get("payload")
+    if not isinstance(payload, dict) or not isinstance(repo, str):
+        return None
+    ref = payload.get("ref")
+    if not isinstance(ref, str) or not ref:
+        return None
+    if kind == "CreateEvent":
+        if payload.get("ref_type") != "branch":
+            return None
+        return repo, BRANCH_REF_PREFIX + ref
+    if not all(
+        isinstance(payload.get(key), str) and payload[key] for key in ("before", "head")
+    ):
+        return None
+    return repo, ref
+
+
 def push_groups(
     events: list[dict[str, Any]], days: int, now: datetime
 ) -> list[PushGroup]:
-    """The window's push events chained per (repo, branch), oldest base to
-    newest head — one compare range per branch instead of one per push."""
+    """One group per (repo, ref) the window's feed saw you push to or
+    create, pushes chained oldest base to newest head — one compare range
+    and one listing per branch instead of one per push."""
     start = window_start(days, now)
     chains: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for event in events:
-        if event.get("type") != "PushEvent":
+        key = _event_ref(event, start)
+        if key is None:
             continue
-        stamp = parse_timestamp(event.get("created_at"))
-        if stamp is None or stamp < start:
-            continue
-        repo_block = event.get("repo")
-        repo = repo_block.get("name") if isinstance(repo_block, dict) else None
-        payload = event.get("payload")
-        if not isinstance(payload, dict) or not isinstance(repo, str):
-            continue
-        ref = payload.get("ref")
-        if not isinstance(ref, str) or not ref:
-            continue
-        if not all(
-            isinstance(payload.get(key), str) and payload[key]
-            for key in ("before", "head")
-        ):
-            continue
-        chains.setdefault((repo, ref), []).append(event)
+        pushes = chains.setdefault(key, [])
+        if event["type"] == "PushEvent":
+            pushes.append(event)
     groups = []
-    for (repo, _ref), pushes in chains.items():
+    for (repo, ref), pushes in chains.items():
         # The feed is newest-first: chain from the oldest push's base to the
         # newest push's head.
         groups.append(
             PushGroup(
                 repo=repo,
-                base=pushes[-1]["payload"]["before"],
-                head=pushes[0]["payload"]["head"],
+                ref=ref,
+                base=pushes[-1]["payload"]["before"] if pushes else None,
+                head=pushes[0]["payload"]["head"] if pushes else None,
                 push_stamps=[push["created_at"] for push in pushes],
             )
         )
     return groups
 
 
-def commits_from_compares(
+def collect_commits(
     groups: list[PushGroup],
     compares: list[dict[str, Any] | None],
+    listings: list[list[dict[str, Any]] | None],
     login: str,
 ) -> tuple[list[tuple[str, Any]], int]:
-    """``(commit refs, unexpanded push count)`` from the compare payloads.
+    """``(commit refs, unexpanded push count)`` from each group's compare
+    payload and branch listing, order-aligned with ``groups``.
 
-    Keeps commits you authored, deduped by sha across branches, stamped with
-    their committer date. A range that couldn't be compared falls back to one
-    commit per push on the push's own day — counted, and reported via the
-    second figure so the approximation is never silent.
+    Keeps commits you authored, deduped by sha across both sources and across
+    branches, stamped with their committer date. A group with neither source
+    falls back to one commit per push on the push's own day — counted, and
+    reported via the second figure so the approximation is never silent.
     """
     refs: list[tuple[str, Any]] = []
     seen: set[str] = set()
     unexpanded = 0
-    for group, compare in zip(groups, compares, strict=True):
+    for group, compare, listing in zip(groups, compares, listings, strict=True):
         owner = _owner_of(group.repo)
         if owner is None:
             continue
-        commits = compare.get("commits") if isinstance(compare, dict) else None
-        if not isinstance(commits, list):
+        compared = compare.get("commits") if isinstance(compare, dict) else None
+        sources = [items for items in (compared, listing) if isinstance(items, list)]
+        if not sources:
             unexpanded += len(group.push_stamps)
             refs.extend((owner, stamp) for stamp in group.push_stamps)
             continue
-        for item in commits:
+        for item in (item for items in sources for item in items):
             if not isinstance(item, dict):
                 continue
             author = item.get("author")
@@ -282,13 +337,14 @@ def coverage_note(
 
 
 def unexpanded_note(unexpanded: int) -> str | None:
-    """The can't-compare fallback warning, or None when nothing fell back."""
+    """The can't-expand fallback warning, or None when nothing fell back."""
     if not unexpanded:
         return None
     plural = "es" if unexpanded != 1 else ""
     return (
         f"Note: {unexpanded} push{plural} could not be expanded into commits "
-        "(rewritten history); each counted as one commit on its push day."
+        "(rewritten history and branch gone); each counted as one commit on "
+        "its push day."
     )
 
 

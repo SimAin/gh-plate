@@ -1,5 +1,5 @@
-"""Tests for plate.retro.model — push chaining, compare expansion, owner
-attribution, and day bucketing."""
+"""Tests for plate.retro.model — push chaining, commit collection from
+compares and branch listings, owner attribution, and day bucketing."""
 
 from __future__ import annotations
 
@@ -53,6 +53,20 @@ def push(
         "repo": {"name": repo},
         "created_at": _iso(days_ago),
         "payload": {"ref": ref, "before": base, "head": head},
+    }
+
+
+def create(
+    days_ago: int,
+    repo: str = "acme/widget",
+    ref: str | None = "feat/new",
+    ref_type: str = "branch",
+) -> dict[str, Any]:
+    return {
+        "type": "CreateEvent",
+        "repo": {"name": repo},
+        "created_at": _iso(days_ago),
+        "payload": {"ref": ref, "ref_type": ref_type},
     }
 
 
@@ -124,14 +138,59 @@ def test_push_groups_drop_out_of_window_and_malformed_pushes() -> None:
     assert model.push_groups(events, 14, NOW) == []
 
 
-# --- commits_from_compares --------------------------------------------------------
+def test_push_groups_expose_branch_and_compare_range() -> None:
+    (group,) = model.push_groups([push(0, ref="refs/heads/feat/x")], 14, NOW)
+    assert group.branch == "feat/x"
+    assert group.compare_range == ("acme/widget", "a" * 8, "b" * 8)
+    assert group.listing_target == ("acme/widget", "feat/x")
+    (tag,) = model.push_groups([push(0, ref="refs/tags/v1")], 14, NOW)
+    assert tag.branch is None  # nothing to list; the compare still runs
+    assert tag.listing_target is None
 
 
-def _group(days_ago: list[int], repo: str = "acme/widget") -> model.PushGroup:
+def test_api_timestamp_uses_z_not_an_offset() -> None:
+    assert model.api_timestamp(NOW) == "2026-06-19T12:00:00Z"
+    assert model.api_timestamp(model.window_start(7, NOW)) == "2026-06-13T00:00:00Z"
+
+
+def test_push_groups_see_a_created_branch_with_no_push() -> None:
+    (group,) = model.push_groups([create(0, ref="feat/new")], 14, NOW)
+    assert group.repo == "acme/widget"
+    assert group.branch == "feat/new"
+    assert group.compare_range is None  # a CreateEvent carries no shas
+    assert group.push_stamps == []
+
+
+def test_push_groups_merge_a_creation_with_its_later_pushes() -> None:
+    events = [  # newest first: the push landed after the branch was created
+        push(0, ref="refs/heads/feat/new", base="c1", head="c2"),
+        create(1, ref="feat/new"),
+    ]
+    (group,) = model.push_groups(events, 14, NOW)
+    assert group.compare_range == ("acme/widget", "c1", "c2")
+    assert len(group.push_stamps) == 1
+
+
+def test_push_groups_ignore_other_creations() -> None:
+    events = [
+        create(0, ref="v1", ref_type="tag"),
+        create(0, ref=None, ref_type="repository"),
+        create(14, ref="feat/old"),  # outside the window
+    ]
+    assert model.push_groups(events, 14, NOW) == []
+
+
+# --- collect_commits ---------------------------------------------------------------
+
+
+def _group(
+    days_ago: list[int], repo: str = "acme/widget", ref: str = "refs/heads/feat/x"
+) -> model.PushGroup:
     return model.PushGroup(
         repo=repo,
-        base="a" * 8,
-        head="b" * 8,
+        ref=ref,
+        base="a" * 8 if days_ago else None,
+        head="b" * 8 if days_ago else None,
         push_stamps=[_iso(d) for d in days_ago],
     )
 
@@ -144,28 +203,68 @@ def test_compare_keeps_only_your_commits_with_their_dates() -> None:
             {"sha": "s", "author": None, "commit": {}},
         ]
     }
-    refs, unexpanded = model.commits_from_compares([_group([0])], [compare], "simon")
+    refs, unexpanded = model.collect_commits([_group([0])], [compare], [None], "simon")
     assert refs == [("acme", _iso(1))]
     assert unexpanded == 0
 
 
 def test_compare_dedupes_shas_across_branches() -> None:
     shared = compare_commit(1, sha="same-sha")
-    refs, _ = model.commits_from_compares(
-        [_group([0]), _group([0], repo="acme/widget")],
+    refs, _ = model.collect_commits(
+        [_group([0]), _group([0], ref="refs/heads/feat/y")],
         [{"commits": [shared]}, {"commits": [shared]}],
+        [None, None],
         "simon",
     )
     assert len(refs) == 1
 
 
-def test_failed_compare_falls_back_to_one_commit_per_push() -> None:
-    refs, unexpanded = model.commits_from_compares([_group([0, 3])], [None], "simon")
+def test_listing_adds_commits_the_compare_missed_and_dedupes_shared_shas() -> None:
+    shared = compare_commit(2, sha="same-sha")
+    refs, unexpanded = model.collect_commits(
+        [_group([0])],
+        [{"commits": [shared]}],
+        [
+            [
+                shared,
+                compare_commit(1, sha="listed-only"),
+                compare_commit(1, login="alice"),
+            ]
+        ],
+        "simon",
+    )
+    assert refs == [("acme", _iso(2)), ("acme", _iso(1))]
+    assert unexpanded == 0
+
+
+def test_listing_alone_counts_a_created_branch() -> None:
+    refs, unexpanded = model.collect_commits(
+        [_group([])], [None], [[compare_commit(0)]], "simon"
+    )
+    assert refs == [("acme", _iso(0))]
+    assert unexpanded == 0
+
+
+def test_listing_covers_a_branch_whose_compare_failed() -> None:
+    refs, unexpanded = model.collect_commits(
+        [_group([0, 3])], [None], [[compare_commit(1)]], "simon"
+    )
+    assert refs == [("acme", _iso(1))]  # the real commits, not one per push
+    assert unexpanded == 0
+
+
+def test_both_sources_failing_falls_back_to_one_commit_per_push() -> None:
+    refs, unexpanded = model.collect_commits([_group([0, 3])], [None], [None], "simon")
     assert refs == [("acme", _iso(0)), ("acme", _iso(3))]
     assert unexpanded == 2
     note = model.unexpanded_note(unexpanded)
     assert note is not None and "2 pushes" in note
     assert model.unexpanded_note(0) is None
+
+
+def test_a_created_branch_nobody_could_list_is_silently_empty() -> None:
+    # No pushes were recorded, so there is nothing to approximate or report.
+    assert model.collect_commits([_group([])], [None], [None], "simon") == ([], 0)
 
 
 # --- build_sections ----------------------------------------------------------------
