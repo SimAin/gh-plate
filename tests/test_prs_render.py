@@ -103,7 +103,7 @@ def review(login: str, state: str) -> dict[str, object]:
     return {"author": {"login": login}, "state": state}
 
 
-def rows_for(*prs: dict[str, object], login: str = "simon", **kwargs: object):
+def rows_for(*prs: dict[str, object], login: str = "user", **kwargs: object):
     return model.normalize_rows(list(prs), login, **kwargs)  # type: ignore[arg-type]
 
 
@@ -112,8 +112,8 @@ def rows_for(*prs: dict[str, object], login: str = "simon", **kwargs: object):
 
 def test_state_glyphs_carry_health_colour() -> None:
     rows = rows_for(
-        pr(2, "Ready", ["simon"], review_decision="APPROVED", rollup="SUCCESS"),
-        pr(1, "Waiting on review", ["simon"]),
+        pr(2, "Ready", ["user"], review_decision="APPROVED", rollup="SUCCESS"),
+        pr(1, "Waiting on review", ["user"]),
     )
     output = render.terminal_table(rows, use_color=True)
     # The leading glyph carries the only health colour on the row.
@@ -131,11 +131,11 @@ def test_conflict_glyph_is_rose() -> None:
 
 def test_draft_and_unknown_use_dim_glyphs() -> None:
     rows = rows_for(
-        pr(1, "Draft", ["simon"], is_draft=True),
+        pr(1, "Draft", ["user"], is_draft=True),
         pr(
             2,
             "Recomputing",
-            ["simon"],
+            ["user"],
             review_decision="APPROVED",
             rollup="SUCCESS",
             mergeable="UNKNOWN",
@@ -151,7 +151,7 @@ def test_draft_and_unknown_use_dim_glyphs() -> None:
 
 def test_pr_number_is_hyperlinked_only_when_enabled() -> None:
     url = "https://github.com/acme/widget/pull/1"
-    rows = rows_for(pr(1, "Mine", ["simon"]))
+    rows = rows_for(pr(1, "Mine", ["user"]))
 
     linked = render.terminal_table(rows, use_color=False, use_links=True)
     assert f"\033]8;;{url}\033\\#1\033]8;;\033\\" in linked
@@ -162,7 +162,7 @@ def test_pr_number_is_hyperlinked_only_when_enabled() -> None:
 
 
 def test_terminal_color_can_be_disabled() -> None:
-    rows = rows_for(pr(1, "Mine", ["simon"]))
+    rows = rows_for(pr(1, "Mine", ["user"]))
     output = render.terminal_table(rows, use_color=False)
 
     assert "\033[" not in output
@@ -175,9 +175,9 @@ def test_terminal_color_can_be_disabled() -> None:
 
 def test_review_options_are_colour_coded() -> None:
     rows = rows_for(
-        pr(1, "approved", ["simon"], review_decision="APPROVED"),
-        pr(2, "changes", ["simon"], review_decision="CHANGES_REQUESTED"),
-        pr(3, "pending", ["simon"]),
+        pr(1, "approved", ["user"], review_decision="APPROVED"),
+        pr(2, "changes", ["user"], review_decision="CHANGES_REQUESTED"),
+        pr(3, "pending", ["user"]),
     )
     out = render.terminal_table(rows, use_color=True)
     assert f"{SOFT_GREEN}approved{RESET}" in out
@@ -192,7 +192,7 @@ def test_review_shows_you_approved_when_i_reviewed() -> None:
             "I reviewed someone else's PR",
             ["alice"],
             review_decision=None,
-            latest_reviews=[review("simon", "APPROVED")],
+            latest_reviews=[review("user", "APPROVED")],
         ),
     )
     output = render.terminal_table(rows, use_color=True)
@@ -209,7 +209,7 @@ def _iso(now: datetime, days_ago: int) -> str:
 def test_stale_last_is_rose_fresh_own_move_is_dim() -> None:
     now = datetime(2026, 6, 19, tzinfo=UTC)
     rows = rows_for(
-        pr(1, "Fresh", ["alice"], last_commit=(_iso(now, 2), "simon")),
+        pr(1, "Fresh", ["alice"], last_commit=(_iso(now, 2), "user")),
         pr(2, "Stale", ["alice"], last_commit=(_iso(now, 30), "alice")),
         now=now,
         stale_days=14,
@@ -224,8 +224,8 @@ def test_stale_last_is_rose_fresh_own_move_is_dim() -> None:
 def test_last_is_full_weight_when_their_move_dim_when_yours() -> None:
     now = datetime(2026, 6, 19, tzinfo=UTC)
     rows = rows_for(
-        pr(1, "Their move", ["simon"], last_review=(_iso(now, 2), "alice")),
-        pr(2, "Your move", ["simon"], last_commit=(_iso(now, 3), "simon")),
+        pr(1, "Their move", ["user"], last_review=(_iso(now, 2), "alice")),
+        pr(2, "Your move", ["user"], last_commit=(_iso(now, 3), "user")),
         now=now,
     )
     output = render.terminal_table(rows, use_color=True)
@@ -244,7 +244,7 @@ def test_age_is_always_dim_context() -> None:
         pr(
             1,
             "Old but active",
-            ["simon"],
+            ["user"],
             created_at=_iso(now, 60),
             last_review=(_iso(now, 1), "alice"),
         ),
@@ -257,7 +257,7 @@ def test_age_is_always_dim_context() -> None:
 
 
 def test_age_and_last_columns_align_in_header() -> None:
-    rows = rows_for(pr(1, "Mine", ["simon"]))
+    rows = rows_for(pr(1, "Mine", ["user"]))
     header = render.terminal_table(rows, use_color=False).splitlines()[0]
     assert "Age" in header
     assert "Last" in header
@@ -268,13 +268,13 @@ def test_age_and_last_columns_align_in_header() -> None:
 
 
 def test_assignee_me_only_is_dimmed() -> None:
-    rows = rows_for(pr(1, "Mine", ["simon"]))
+    rows = rows_for(pr(1, "Mine", ["user"]))
     assert render._display_assignees_plain(rows[0]) == "me"
     assert f"{DIM}me{RESET}" in render.terminal_table(rows, use_color=True)
 
 
 def test_chaseable_human_assignee_stays_full_weight() -> None:
-    rows = rows_for(pr(1, "Mine, alice's to land", ["alice"], author="simon"))
+    rows = rows_for(pr(1, "Mine, alice's to land", ["alice"], author="user"))
     assert rows[0].is_mine
     assert render._display_assignees_plain(rows[0]) == "alice"
     # Alice is chaseable, so she stays at full weight (never dimmed).
@@ -302,7 +302,7 @@ def test_bot_authors_are_dimmed() -> None:
 def test_ci_glyph_coloured_by_state() -> None:
     rows = rows_for(
         pr(1, "Failing", ["alice"], rollup="FAILURE"),
-        pr(2, "Passing", ["simon"], review_decision="APPROVED", rollup="SUCCESS"),
+        pr(2, "Passing", ["user"], review_decision="APPROVED", rollup="SUCCESS"),
     )
     output = render.terminal_table(rows, use_color=True)
     # #1 is to-review (full weight); #2 is yours (full weight) — neither dimmed,
@@ -348,7 +348,7 @@ def test_emoji_cjk_title_keeps_columns_aligned() -> None:
 
 
 def test_bold_header_and_unicode_rule() -> None:
-    rows = rows_for(pr(1, "Mine", ["simon"]))
+    rows = rows_for(pr(1, "Mine", ["user"]))
     output = render.terminal_table(rows, use_color=True)
     assert BOLD in output
     assert "─" in output
@@ -357,7 +357,7 @@ def test_bold_header_and_unicode_rule() -> None:
 
 def test_labeled_group_dividers_carry_counts_and_order() -> None:
     rows = rows_for(
-        pr(1, "Mine", ["simon"]),
+        pr(1, "Mine", ["user"]),
         pr(2, "To review", ["alice"]),
         pr(3, "Someone else's", ["bob"], review_decision="APPROVED"),
     )
@@ -400,7 +400,7 @@ def test_terminal_layout_fills_the_terminal_exactly() -> None:
 
 
 def test_comment_count_right_aligned() -> None:
-    rows = rows_for(pr(1, "Mine", ["simon"], comments=7))
+    rows = rows_for(pr(1, "Mine", ["user"], comments=7))
     data_line = render.terminal_table(rows, use_color=False).splitlines()[-1]
     # Right-aligned: the count sits flush at the end with no trailing pad.
     assert data_line.endswith("7")
@@ -410,7 +410,7 @@ def test_comment_count_capped_at_99_plus() -> None:
     assert render._format_comments(0) == "0"
     assert render._format_comments(99) == "99"
     assert render._format_comments(1234) == "99+"
-    rows = rows_for(pr(1, "Very chatty", ["simon"], comments=150))
+    rows = rows_for(pr(1, "Very chatty", ["user"], comments=150))
     output = render.terminal_table(rows, use_color=False)
     assert "99+" in output
     assert "150" not in output
@@ -422,7 +422,7 @@ def test_comment_count_capped_at_99_plus() -> None:
 def test_summary_line_reports_all_figures() -> None:
     now = datetime(2026, 6, 19, tzinfo=UTC)
     rows = rows_for(
-        pr(1, "Mine", ["simon"], last_review=(_iso(now, 2), "alice")),
+        pr(1, "Mine", ["user"], last_review=(_iso(now, 2), "alice")),
         pr(2, "To review", ["alice"]),
         pr(3, "Conflicting", ["alice"], mergeable="CONFLICTING"),
         pr(4, "Failing", ["bob"], review_decision="APPROVED", rollup="FAILURE"),
@@ -435,7 +435,7 @@ def test_summary_line_reports_all_figures() -> None:
 
 
 def test_summary_line_suppresses_zero_counts() -> None:
-    rows = rows_for(pr(1, "Mine", ["simon"]))
+    rows = rows_for(pr(1, "Mine", ["user"]))
     assert render.summary_line(model.summary_counts(rows)) == "1 open"
 
 
@@ -468,7 +468,7 @@ def test_symbol_key_plain_when_color_disabled() -> None:
 
 def test_markdown_keeps_scan_signals() -> None:
     rows = rows_for(
-        pr(1, "Mine", ["simon"]),
+        pr(1, "Mine", ["user"]),
         pr(2, "To review", ["alice"]),
         pr(3, RELEASE_TITLE, review_decision="APPROVED"),
     )
@@ -495,7 +495,7 @@ def test_markdown_carries_your_move_in_signal_and_last_column() -> None:
         pr(
             1,
             "Alice reviewed",
-            ["simon"],
+            ["user"],
             created_at=_iso(now, 7),
             last_review=(_iso(now, 2), "alice"),
         ),
@@ -508,7 +508,7 @@ def test_markdown_carries_your_move_in_signal_and_last_column() -> None:
 
 
 def test_markdown_escapes_pipes_in_cells() -> None:
-    rows = rows_for(pr(1, "Fix a | b parsing", ["simon"]))
+    rows = rows_for(pr(1, "Fix a | b parsing", ["user"]))
     output = render.markdown_table(rows)
     assert r"Fix a \| b parsing" in output
     # An unescaped pipe would add a spurious column; the escape prevents that.
@@ -516,7 +516,7 @@ def test_markdown_escapes_pipes_in_cells() -> None:
 
 
 def test_markdown_has_no_ansi() -> None:
-    rows = rows_for(pr(1, "Mine", ["simon"], review_decision="APPROVED"))
+    rows = rows_for(pr(1, "Mine", ["user"], review_decision="APPROVED"))
     assert "\033[" not in render.markdown_table(rows)
 
 
@@ -533,14 +533,14 @@ def owner_sections() -> list[tuple[str, list[model.PrRow]]]:
     # repo-a: a single settled row (neither mine nor to-review -> dimmed).
     rows = model.normalize_rows(
         [
-            _in_repo(pr(1, "Mine here", ["simon"]), "acme/repo-b"),
+            _in_repo(pr(1, "Mine here", ["user"]), "acme/repo-b"),
             _in_repo(pr(2, "Review me", ["alice"]), "acme/repo-b"),
             _in_repo(
                 pr(3, "Settled elsewhere", ["bob"], review_decision="APPROVED"),
                 "acme/repo-a",
             ),
         ],
-        "simon",
+        "user",
     )
     return model.group_by_repo(rows)
 
@@ -649,7 +649,7 @@ def _with_timeline(
 
 
 def test_subline_appears_only_when_show_timeline() -> None:
-    rows = rows_for(pr(1, "Mine", ["simon"]))
+    rows = rows_for(pr(1, "Mine", ["user"]))
     assert "↳" not in render.terminal_table(rows, use_color=False)
     out = render.terminal_table(rows, use_color=False, show_timeline=True)
     assert out.count("↳") == 1
@@ -657,7 +657,7 @@ def test_subline_appears_only_when_show_timeline() -> None:
 
 def test_subline_geometry() -> None:
     # Dim connector under the PR number, one cell per day starting at Title.
-    rows = rows_for(pr(1, "Mine", ["simon"]))
+    rows = rows_for(pr(1, "Mine", ["user"]))
     out = render.terminal_table(rows, use_color=False, show_timeline=True)
     subline = next(line for line in out.splitlines() if "↳" in line)
     assert subline.index("↳") == 3
@@ -667,9 +667,9 @@ def test_subline_geometry() -> None:
 
 def test_subline_glyphs_carry_actor_and_verdict_colours() -> None:
     node = _with_timeline(
-        pr(1, "Active", ["simon"]),
+        pr(1, "Active", ["user"]),
         [
-            _commit_event(_iso(NOW, 5), "simon"),
+            _commit_event(_iso(NOW, 5), "user"),
             _commit_event(_iso(NOW, 4), "alice"),
             _review_event(_iso(NOW, 2), "alice", state="CHANGES_REQUESTED"),
             _review_event(_iso(NOW, 1), "alice", state="APPROVED"),

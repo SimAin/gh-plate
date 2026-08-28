@@ -103,11 +103,11 @@ RELEASE_TITLE = "chore(main): release 0.5.0"
 def test_normalizes_flags_comments_and_release() -> None:
     rows = model.normalize_rows(
         [
-            pr(1, "Mine", ["simon"], comments=2),
+            pr(1, "Mine", ["user"], comments=2),
             pr(2, "Needs review", ["alice"], review_decision=None, comments=3),
             pr(3, RELEASE_TITLE, review_decision="APPROVED"),
         ],
-        "simon",
+        "user",
     )
 
     assert rows[0].is_mine
@@ -122,10 +122,10 @@ def test_normalizes_flags_comments_and_release() -> None:
 def test_authored_pr_is_mine_even_without_assignee() -> None:
     rows = model.normalize_rows(
         [
-            pr(1, "Authored, unassigned", author="simon"),
+            pr(1, "Authored, unassigned", author="user"),
             pr(2, "Someone else's, unassigned", author="alice"),
         ],
-        "simon",
+        "user",
     )
 
     assert rows[0].is_mine
@@ -140,9 +140,9 @@ def test_sort_priority() -> None:
             pr(1, "Assigned to someone", ["alice"], review_decision="APPROVED"),
             pr(2, "Unassigned approved", review_decision="APPROVED"),
             pr(3, "To review", ["alice"]),
-            pr(4, "Mine", ["simon"]),
+            pr(4, "Mine", ["user"]),
         ],
-        "simon",
+        "user",
     )
 
     sorted_numbers = [row.number for row in sorted(rows, key=model.sort_key)]
@@ -164,11 +164,11 @@ def test_release_pr_detection_matches_version_suffix_not_ordinary_prs() -> None:
 def test_me_substitution_in_assignees() -> None:
     rows = model.normalize_rows(
         [
-            pr(1, "Just me", ["simon"]),
-            pr(2, "Shared", ["simon", "alice"], author="simon"),
+            pr(1, "Just me", ["user"]),
+            pr(2, "Shared", ["user", "alice"], author="user"),
             pr(3, "Nobody", []),
         ],
-        "simon",
+        "user",
     )
 
     assert rows[0].assignees == ["me"]
@@ -178,7 +178,7 @@ def test_me_substitution_in_assignees() -> None:
 
 def test_pr_state_priority() -> None:
     def state(**kwargs: Any) -> str:
-        row = model.normalize_rows([pr(1, "x", ["simon"], **kwargs)], "simon")[0]
+        row = model.normalize_rows([pr(1, "x", ["user"], **kwargs)], "user")[0]
         return model.pr_state(row)
 
     assert state(is_draft=True) == "draft"
@@ -218,10 +218,10 @@ def test_i_approved_from_latest_reviews() -> None:
                 "I reviewed someone else's PR",
                 ["alice"],
                 review_decision=None,
-                latest_reviews=[review("simon", "APPROVED")],
+                latest_reviews=[review("user", "APPROVED")],
             ),
         ],
-        "simon",
+        "user",
     )
 
     assert rows[0].i_approved
@@ -236,7 +236,7 @@ def test_age_is_days_since_created() -> None:
     now = datetime(2026, 6, 19, tzinfo=UTC)
     rows = model.normalize_rows(
         [pr(1, "Week old", ["alice"], created_at=_iso(now, 7))],
-        "simon",
+        "user",
         now=now,
     )
     assert rows[0].age_days == 7
@@ -264,7 +264,7 @@ def test_staleness_anchors_on_last_human_activity_not_updated_at() -> None:
                 last_review=(_iso(now, 2), "alice"),
             ),
         ],
-        "simon",
+        "user",
         now=now,
         stale_days=14,
     )
@@ -282,12 +282,12 @@ def test_last_activity_is_the_max_across_channels() -> None:
                 1,
                 "All three channels",
                 ["alice"],
-                last_commit=(_iso(now, 7), "simon"),
+                last_commit=(_iso(now, 7), "user"),
                 last_review=(_iso(now, 2), "alice"),
-                last_comment=(_iso(now, 4), "simon"),
+                last_comment=(_iso(now, 4), "user"),
             ),
         ],
-        "simon",
+        "user",
         now=now,
     )
     # The review (2d, alice) wins; the per-channel lags are all kept.
@@ -302,10 +302,10 @@ def test_last_activity_direction_is_viewer_relative() -> None:
     now = datetime(2026, 6, 19, tzinfo=UTC)
     rows = model.normalize_rows(
         [
-            pr(1, "You moved last", ["alice"], last_commit=(_iso(now, 1), "simon")),
+            pr(1, "You moved last", ["alice"], last_commit=(_iso(now, 1), "user")),
             pr(2, "They moved last", ["alice"], last_review=(_iso(now, 1), "alice")),
         ],
-        "simon",
+        "user",
         now=now,
     )
     assert rows[0].last_activity_mine is True
@@ -334,7 +334,7 @@ def test_bot_events_never_count_as_activity() -> None:
                 comment_author_type="Bot",
             ),
         ],
-        "simon",
+        "user",
         now=now,
     )
     for row in rows:
@@ -355,7 +355,7 @@ def test_bot_only_pr_falls_back_to_updated_at_with_no_direction() -> None:
                 last_commit=(_iso(now, 5), "renovate[bot]"),
             ),
         ],
-        "simon",
+        "user",
         now=now,
     )
     assert rows[0].last_activity_days == 5
@@ -366,7 +366,7 @@ def test_commit_without_linked_user_counts_but_claims_no_direction() -> None:
     now = datetime(2026, 6, 19, tzinfo=UTC)
     rows = model.normalize_rows(
         [pr(1, "Orphan commit", ["alice"], last_commit=(_iso(now, 3), None))],
-        "simon",
+        "user",
         now=now,
     )
     assert rows[0].last_activity_days == 3
@@ -393,7 +393,7 @@ def test_bot_detection_matrix() -> None:
             pr(4, "Typed as Bot", author="some-ci", author_type="Bot"),
             pr(5, "Human, not a bot", author="dependabotfan"),
         ],
-        "simon",
+        "user",
     )
 
     assert rows[0].bot_name == "dependabot"
@@ -415,7 +415,7 @@ def test_check_state_follows_githubs_rollup() -> None:
         None: "none",
     }
     for rollup, expected in cases.items():
-        rows = model.normalize_rows([pr(1, "x", rollup=rollup)], "simon")
+        rows = model.normalize_rows([pr(1, "x", rollup=rollup)], "user")
         assert rows[0].check_state == expected
 
 
@@ -425,7 +425,7 @@ def test_conflict_flag() -> None:
             pr(1, "Clean", ["alice"], mergeable="MERGEABLE"),
             pr(2, "Conflicting", ["alice"], mergeable="CONFLICTING"),
         ],
-        "simon",
+        "user",
     )
 
     assert not rows[0].has_conflicts
@@ -436,11 +436,11 @@ def test_conflict_flag() -> None:
 def test_grouping_flags() -> None:
     rows = model.normalize_rows(
         [
-            pr(1, "Mine", ["simon"]),
+            pr(1, "Mine", ["user"]),
             pr(2, "To review", ["alice"]),
             pr(3, "Someone else's, settled", ["bob"], review_decision="APPROVED"),
         ],
-        "simon",
+        "user",
     )
 
     assert model.sort_group(rows[0]) == 0
@@ -451,12 +451,12 @@ def test_grouping_flags() -> None:
 def test_summary_counts() -> None:
     rows = model.normalize_rows(
         [
-            pr(1, "Mine", ["simon"]),
+            pr(1, "Mine", ["user"]),
             pr(2, "To review", ["alice"]),
             pr(3, "Conflicting", ["alice"], mergeable="CONFLICTING"),
             pr(4, "Failing", ["bob"], review_decision="APPROVED", rollup="FAILURE"),
         ],
-        "simon",
+        "user",
     )
 
     counts = model.summary_counts(rows)
@@ -467,7 +467,7 @@ def test_summary_counts() -> None:
 
 
 def test_summary_counts_zeroes_when_nothing_pending() -> None:
-    rows = model.normalize_rows([pr(1, "Mine", ["simon"])], "simon")
+    rows = model.normalize_rows([pr(1, "Mine", ["user"])], "user")
     counts = model.summary_counts(rows)
     assert counts == model.PrSummary(
         open=1, to_review=0, conflicts=0, failing_ci=0, your_move=0
@@ -479,9 +479,9 @@ def test_your_move_counts_their_last_move_on_yours_and_to_review_only() -> None:
     rows = model.normalize_rows(
         [
             # Mine, alice reviewed last -> my move.
-            pr(1, "Mine", ["simon"], last_review=(_iso(now, 2), "alice")),
+            pr(1, "Mine", ["user"], last_review=(_iso(now, 2), "alice")),
             # Mine, I pushed last -> waiting on them.
-            pr(2, "Mine too", ["simon"], last_commit=(_iso(now, 1), "simon")),
+            pr(2, "Mine too", ["user"], last_commit=(_iso(now, 1), "user")),
             # To review, author pushed last -> my move.
             pr(3, "To review", ["alice"], last_commit=(_iso(now, 3), "alice")),
             # The rest (settled): their move, but not mine to make.
@@ -493,7 +493,7 @@ def test_your_move_counts_their_last_move_on_yours_and_to_review_only() -> None:
                 last_commit=(_iso(now, 1), "bob"),
             ),
         ],
-        "simon",
+        "user",
         now=now,
     )
     assert [model.your_move(row) for row in rows] == [True, False, True, False]
@@ -501,7 +501,7 @@ def test_your_move_counts_their_last_move_on_yours_and_to_review_only() -> None:
 
 
 def test_comment_count_is_the_badge_figure() -> None:
-    rows = model.normalize_rows([pr(1, "Mine", ["simon"], comments=9)], "simon")
+    rows = model.normalize_rows([pr(1, "Mine", ["user"], comments=9)], "user")
     assert rows[0].comments_count == 9
 
 
@@ -515,20 +515,20 @@ def _with_repo(node: dict[str, object], repo: str) -> dict[str, object]:
 
 def test_repo_read_from_nodes_own_repository_field() -> None:
     rows = model.normalize_rows(
-        [_with_repo(pr(1, "Owner-search node"), "acme/widget")], "simon"
+        [_with_repo(pr(1, "Owner-search node"), "acme/widget")], "user"
     )
     assert rows[0].repo == "acme/widget"
 
 
 def test_repo_falls_back_to_the_queried_repo() -> None:
     # Repo-view nodes carry no repository field; the call site passes the repo.
-    rows = model.normalize_rows([pr(1, "Repo-view node")], "simon", repo="acme/widget")
+    rows = model.normalize_rows([pr(1, "Repo-view node")], "user", repo="acme/widget")
     assert rows[0].repo == "acme/widget"
 
 
 def test_nodes_own_repository_wins_over_fallback() -> None:
     rows = model.normalize_rows(
-        [_with_repo(pr(1, "x"), "acme/other")], "simon", repo="acme/widget"
+        [_with_repo(pr(1, "x"), "acme/other")], "user", repo="acme/widget"
     )
     assert rows[0].repo == "acme/other"
 
@@ -546,7 +546,7 @@ def test_group_by_repo_sections_in_first_appearance_order() -> None:
             _with_repo(pr(4, "old too"), "acme/repo-b"),
             _with_repo(pr(1, "oldest"), "acme/repo-c"),
         ],
-        "simon",
+        "user",
     )
     sections = model.group_by_repo(rows)
     assert [repo for repo, _ in sections] == [
@@ -563,7 +563,7 @@ def test_group_by_repo_rows_keep_fetch_order_within_a_repo() -> None:
             _with_repo(pr(3, "elsewhere"), "acme/repo-a"),
             _with_repo(pr(9, "second fetched"), "acme/repo-b"),
         ],
-        "simon",
+        "user",
     )
     sections = dict(model.group_by_repo(rows))
     assert [row.number for row in sections["acme/repo-b"]] == [5, 9]
@@ -612,17 +612,17 @@ def comment_event(
 
 def buckets(events: list[dict[str, object]]) -> list[model.DayEvent | None] | None:
     node = {**pr(1, "x", ["alice"]), "timelineItems": {"nodes": events}}
-    return model.normalize_rows([node], "simon", now=NOW)[0].timeline
+    return model.normalize_rows([node], "user", now=NOW)[0].timeline
 
 
 def test_timeline_none_when_not_fetched() -> None:
-    rows = model.normalize_rows([pr(1, "x")], "simon", now=NOW)
+    rows = model.normalize_rows([pr(1, "x")], "user", now=NOW)
     assert rows[0].timeline is None
 
 
 def test_timeline_buckets_by_day_oldest_first() -> None:
     line = buckets(
-        [commit_event(_iso(NOW, 3), "alice"), comment_event(_iso(NOW, 0), "simon")]
+        [commit_event(_iso(NOW, 3), "alice"), comment_event(_iso(NOW, 0), "user")]
     )
     assert line is not None
     assert len(line) == model.TIMELINE_DAYS
@@ -685,7 +685,7 @@ def test_timeline_bot_events_are_skipped() -> None:
 def test_timeline_direction_is_viewer_relative() -> None:
     line = buckets(
         [
-            commit_event(_iso(NOW, 2), "simon"),
+            commit_event(_iso(NOW, 2), "user"),
             commit_event(_iso(NOW, 1), "alice"),
             commit_event(_iso(NOW, 0), None),
         ]

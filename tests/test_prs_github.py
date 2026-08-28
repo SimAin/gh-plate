@@ -38,19 +38,19 @@ def page(
 
 
 def test_parse_graphql_documents_splits_concatenated_pages() -> None:
-    text = page("simon", [1, 2]) + page("simon", [3])
+    text = page("user", [1, 2]) + page("user", [3])
     documents = github.parse_graphql_documents(text)
     assert len(documents) == 2
 
 
 def test_parse_graphql_documents_tolerates_whitespace_between_pages() -> None:
-    text = page("simon", [1]) + "\n\n  " + page("simon", [2]) + "\n"
+    text = page("user", [1]) + "\n\n  " + page("user", [2]) + "\n"
     documents = github.parse_graphql_documents(text)
     assert len(documents) == 2
 
 
 def test_parse_graphql_documents_ignores_non_dict_documents() -> None:
-    text = "[1, 2, 3]" + page("simon", [1])
+    text = "[1, 2, 3]" + page("user", [1])
     documents = github.parse_graphql_documents(text)
     assert len(documents) == 1
 
@@ -70,20 +70,20 @@ def test_parse_graphql_documents_raises_value_error_on_malformed_json() -> None:
 
 def test_merge_graphql_pages_combines_nodes_and_extracts_viewer() -> None:
     documents = [
-        json.loads(page("simon", [1, 2])),
-        json.loads(page("simon", [3])),
+        json.loads(page("user", [1, 2])),
+        json.loads(page("user", [3])),
     ]
     viewer, prs = github.merge_graphql_pages(documents)
-    assert viewer == "simon"
+    assert viewer == "user"
     assert [p["number"] for p in prs] == [1, 2, 3]
 
 
 def test_merge_graphql_pages_keeps_last_seen_viewer() -> None:
     # viewer is fetched on every page identically; the last non-empty login
     # wins if pages ever disagreed (they shouldn't in practice).
-    documents = [json.loads(page("simon", [1])), json.loads(page("simon", [2]))]
+    documents = [json.loads(page("user", [1])), json.loads(page("user", [2]))]
     viewer, _ = github.merge_graphql_pages(documents)
-    assert viewer == "simon"
+    assert viewer == "user"
 
 
 def test_merge_graphql_pages_viewer_none_when_never_present() -> None:
@@ -94,9 +94,9 @@ def test_merge_graphql_pages_viewer_none_when_never_present() -> None:
 
 
 def test_merge_graphql_pages_tolerates_missing_repository() -> None:
-    documents = [json.loads(page("simon", [], include_repository=False))]
+    documents = [json.loads(page("user", [], include_repository=False))]
     viewer, prs = github.merge_graphql_pages(documents)
-    assert viewer == "simon"
+    assert viewer == "user"
     assert prs == []
 
 
@@ -117,15 +117,15 @@ def _fake_run_with_stdout(stdout: str, returncode: int = 0) -> Any:
 
 
 def test_fetch_prs_and_viewer_single_page(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout(page("simon", [1, 2])))
+    monkeypatch.setattr(gh, "run_command", _fake_run_with_stdout(page("user", [1, 2])))
     viewer, prs = github.fetch_prs_and_viewer("an-org/a-repo", 10)
-    assert viewer == "simon"
+    assert viewer == "user"
     assert [p["number"] for p in prs] == [1, 2]
 
 
 def test_fetch_prs_and_viewer_slices_to_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        gh, "run_command", _fake_run_with_stdout(page("simon", [1, 2, 3]))
+        gh, "run_command", _fake_run_with_stdout(page("user", [1, 2, 3]))
     )
     _viewer, prs = github.fetch_prs_and_viewer("an-org/a-repo", 2)
     assert [p["number"] for p in prs] == [1, 2]
@@ -162,7 +162,7 @@ def test_fetch_prs_and_viewer_page_size_capped_at_100(
 
     def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
         captured["args"] = args
-        return subprocess.CompletedProcess(args, 0, stdout=page("simon", []), stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout=page("user", []), stderr="")
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     github.fetch_prs_and_viewer("an-org/a-repo", 500)
@@ -178,7 +178,7 @@ def test_fetch_prs_and_viewer_omits_paginate_when_limit_fits_one_page(
 
     def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
         captured["args"] = args
-        return subprocess.CompletedProcess(args, 0, stdout=page("simon", []), stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout=page("user", []), stderr="")
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     github.fetch_prs_and_viewer("an-org/a-repo", 10)
@@ -194,7 +194,7 @@ def test_fetch_prs_and_viewer_passes_owner_and_name(
 
     def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
         captured["args"] = args
-        return subprocess.CompletedProcess(args, 0, stdout=page("simon", []), stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout=page("user", []), stderr="")
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     github.fetch_prs_and_viewer("an-org/a-repo", 10)
@@ -407,7 +407,7 @@ def test_fetch_prs_and_viewer_timeline_flag_picks_the_query(
 
     def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
         captured["args"] = args
-        return subprocess.CompletedProcess(args, 0, stdout=page("simon", []), stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout=page("user", []), stderr="")
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     github.fetch_prs_and_viewer("an-org/a-repo", 10)
