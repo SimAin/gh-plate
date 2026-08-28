@@ -67,8 +67,8 @@ def test_panel_structure_and_alignment() -> None:
 
 
 def test_one_self_contained_panel_per_owner_in_order() -> None:
-    out = render.panel([section("acme"), section("SimAin")], DAYS, NOW, use_color=False)
-    assert out.index("── acme") < out.index("── SimAin")
+    out = render.panel([section("acme"), section("user")], DAYS, NOW, use_color=False)
+    assert out.index("── acme") < out.index("── user")
     assert out.count("reviews") == 2  # each section carries its own rows
     rulers = [line for line in out.splitlines() if line.rstrip().endswith("Σ")]
     assert len(rulers) == 2
@@ -145,10 +145,10 @@ def test_color_never_has_no_ansi() -> None:
 
 
 def test_markdown_one_heading_and_table_per_owner() -> None:
-    out = render.markdown_table([section("acme"), section("SimAin")], DAYS)
+    out = render.markdown_table([section("acme"), section("user")], DAYS)
     assert "## acme" in out
-    assert "## SimAin" in out
-    assert out.index("## acme") < out.index("## SimAin")
+    assert "## user" in out
+    assert out.index("## acme") < out.index("## user")
     assert out.count("| Channel | Total | Last |") == 2
     assert "| reviews | 2 | last 2d ago |" in out
     assert "| commits | 2 | today |" in out

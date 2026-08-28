@@ -38,7 +38,7 @@ def closed_item(repo: str = "acme/widget") -> dict[str, Any]:
     }
 
 
-def review_event(repo: str = "SimAin/toy") -> dict[str, Any]:
+def review_event(repo: str = "user/toy") -> dict[str, Any]:
     return {
         "type": "PullRequestReviewEvent",
         "repo": {"name": repo},
@@ -55,7 +55,7 @@ def push_event(repo: str = "acme/widget") -> dict[str, Any]:
     }
 
 
-def compare_payload(login: str = "simon") -> str:
+def compare_payload(login: str = "user") -> str:
     return json.dumps(
         {
             "total_commits": 1,
@@ -87,16 +87,16 @@ def _paged_run(responses: list[str]) -> tuple[Any, list[str]]:
 def test_fetch_events_stops_after_the_first_short_page(monkeypatch) -> None:
     fake_run, paths = _paged_run([json.dumps([review_event()] * 3)])
     monkeypatch.setattr(gh, "run_command", fake_run)
-    events = github.fetch_events("simon")
+    events = github.fetch_events("user")
     assert len(events) == 3
-    assert paths == ["users/simon/events?per_page=100&page=1"]
+    assert paths == ["users/user/events?per_page=100&page=1"]
 
 
 def test_fetch_events_walks_full_pages_up_to_the_cap(monkeypatch) -> None:
     full = json.dumps([review_event()] * github.EVENTS_PER_PAGE)
     fake_run, paths = _paged_run([full, full, full])
     monkeypatch.setattr(gh, "run_command", fake_run)
-    events = github.fetch_events("simon")
+    events = github.fetch_events("user")
     assert len(events) == github.EVENTS_FEED_CAP
     # never asks for a page past the cap — that is a hard API error
     assert len(paths) == github.EVENTS_MAX_PAGES
@@ -106,21 +106,19 @@ def test_fetch_opened_builds_the_search_and_reports_totals(monkeypatch) -> None:
     body = json.dumps({"total_count": 1, "items": [pr_item()]})
     fake_run, paths = _paged_run([body])
     monkeypatch.setattr(gh, "run_command", fake_run)
-    items, total = github.fetch_opened("simon", "2026-06-06")
+    items, total = github.fetch_opened("user", "2026-06-06")
     assert (len(items), total) == (1, 1)
-    assert paths[0].startswith(
-        "search/issues?q=author:simon+is:pr+created:>=2026-06-06"
-    )
+    assert paths[0].startswith("search/issues?q=author:user+is:pr+created:>=2026-06-06")
 
 
 def test_fetch_closed_builds_the_search_and_reports_totals(monkeypatch) -> None:
     body = json.dumps({"total_count": 1, "items": [closed_item()]})
     fake_run, paths = _paged_run([body])
     monkeypatch.setattr(gh, "run_command", fake_run)
-    items, total = github.fetch_closed("simon", "2026-06-06")
+    items, total = github.fetch_closed("user", "2026-06-06")
     assert (len(items), total) == (1, 1)
     assert paths[0].startswith(
-        "search/issues?q=author:simon+is:pr+is:closed+closed:>=2026-06-06"
+        "search/issues?q=author:user+is:pr+is:closed+closed:>=2026-06-06"
     )
 
 
@@ -129,7 +127,7 @@ def test_search_pagination_stops_on_a_short_page(monkeypatch) -> None:
     short_page = {"total_count": 150, "items": [pr_item()] * 50}
     fake_run, paths = _paged_run([json.dumps(full_page), json.dumps(short_page)])
     monkeypatch.setattr(gh, "run_command", fake_run)
-    items, total = github.fetch_opened("simon", "2026-06-06")
+    items, total = github.fetch_opened("user", "2026-06-06")
     assert len(items) == 150
     assert total == 150
     assert len(paths) == 2
@@ -140,7 +138,7 @@ def test_search_total_survives_a_page_missing_total_count(monkeypatch) -> None:
     bare_page = json.dumps({"items": [pr_item()] * 50})
     fake_run, _ = _paged_run([full_page, bare_page])
     monkeypatch.setattr(gh, "run_command", fake_run)
-    _, total = github.fetch_opened("simon", "2026-06-06")
+    _, total = github.fetch_opened("user", "2026-06-06")
     assert total == 150
 
 
@@ -184,15 +182,15 @@ def test_fetch_compares_skip_none_ranges_keeping_alignment(monkeypatch) -> None:
 
 
 def test_fetch_branch_commits_lists_your_commits_since_the_window(monkeypatch) -> None:
-    listing = [{"sha": "c" * 8, "author": {"login": "simon"}}]
+    listing = [{"sha": "c" * 8, "author": {"login": "user"}}]
     fake_run, paths = _paged_run([json.dumps(listing)])
     monkeypatch.setattr(gh, "run_command", fake_run)
     listings = github.fetch_branch_commits(
-        [("acme/widget", "feat/x")], "simon", "2026-06-06T00:00:00Z"
+        [("acme/widget", "feat/x")], "user", "2026-06-06T00:00:00Z"
     )
     assert listings == [listing]
     assert paths == [
-        "repos/acme/widget/commits?sha=feat%2Fx&author=simon"
+        "repos/acme/widget/commits?sha=feat%2Fx&author=user"
         "&since=2026-06-06T00:00:00Z&per_page=100&page=1"
     ]
 
@@ -202,7 +200,7 @@ def test_fetch_branch_commits_walks_full_pages(monkeypatch) -> None:
     fake_run, paths = _paged_run([json.dumps(full), json.dumps(full[:1])])
     monkeypatch.setattr(gh, "run_command", fake_run)
     (listing,) = github.fetch_branch_commits(
-        [("acme/widget", "main")], "simon", "2026-06-06T00:00:00Z"
+        [("acme/widget", "main")], "user", "2026-06-06T00:00:00Z"
     )
     assert listing is not None and len(listing) == github.COMMITS_PER_PAGE + 1
     assert [path[-6:] for path in paths] == ["page=1", "page=2"]
@@ -222,7 +220,7 @@ def test_fetch_branch_commits_keep_earlier_pages_when_a_later_one_fails(
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     (listing,) = github.fetch_branch_commits(
-        [("acme/widget", "main")], "simon", "2026-06-06T00:00:00Z"
+        [("acme/widget", "main")], "user", "2026-06-06T00:00:00Z"
     )
     assert listing == full  # page 2 lost, page 1 kept; not a None fallback
 
@@ -236,7 +234,7 @@ def test_fetch_branch_commits_align_around_a_none_in_the_middle(monkeypatch) -> 
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     listings = github.fetch_branch_commits(
-        [("acme/a", "main"), None, ("acme/b", "main")], "simon", "2026-06-06T00:00:00Z"
+        [("acme/a", "main"), None, ("acme/b", "main")], "user", "2026-06-06T00:00:00Z"
     )
     assert listings == [[{"sha": "acme"}], None, [{"sha": "acme"}]]
 
@@ -250,7 +248,7 @@ def test_fetch_branch_commits_none_for_missing_branches_and_non_branches(
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     listings = github.fetch_branch_commits(
-        [("acme/gone", "feat/merged"), None], "simon", "2026-06-06T00:00:00Z"
+        [("acme/gone", "feat/merged"), None], "user", "2026-06-06T00:00:00Z"
     )
     assert listings == [None, None]
 
@@ -261,7 +259,7 @@ def test_fetch_gh_failure_raises(monkeypatch) -> None:
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     with pytest.raises(PlateError, match="authenticated"):
-        github.fetch_events("simon")
+        github.fetch_events("user")
 
 
 def test_fetch_rate_limit_failure_explains_itself(monkeypatch) -> None:
@@ -272,7 +270,7 @@ def test_fetch_rate_limit_failure_explains_itself(monkeypatch) -> None:
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     with pytest.raises(PlateError) as excinfo:
-        github.fetch_events("simon")
+        github.fetch_events("user")
 
     message = str(excinfo.value)
     assert "secondary rate limit" in message  # the raw stderr is kept
@@ -286,7 +284,7 @@ def test_fetch_malformed_json_raises(monkeypatch) -> None:
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     with pytest.raises(PlateError, match="Could not parse"):
-        github.fetch_events("simon")
+        github.fetch_events("user")
 
 
 def test_fetch_unexpected_payloads_raise(monkeypatch) -> None:
@@ -297,9 +295,9 @@ def test_fetch_unexpected_payloads_raise(monkeypatch) -> None:
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     with pytest.raises(PlateError, match="unexpected events payload"):
-        github.fetch_events("simon")
+        github.fetch_events("user")
     with pytest.raises(PlateError, match="unexpected search payload"):
-        github.fetch_opened("simon", "2026-06-06")
+        github.fetch_opened("user", "2026-06-06")
 
 
 # --- transient-5xx retries (the same policy the search views use) -------------
@@ -326,7 +324,7 @@ def test_fetch_retries_a_transient_failure(monkeypatch) -> None:
     monkeypatch.setattr(gh, "run_command", fake_run)
     monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
 
-    assert len(github.fetch_events("simon")) == 1
+    assert len(github.fetch_events("user")) == 1
     assert len(fake_run.calls) == 2
 
 
@@ -337,7 +335,7 @@ def test_fetch_persistent_transient_failure_raises(monkeypatch) -> None:
     monkeypatch.setattr(gh.time, "sleep", sleeps.append)
 
     with pytest.raises(PlateError) as excinfo:
-        github.fetch_events("simon")
+        github.fetch_events("user")
 
     assert "HTTP 502" in str(excinfo.value)
     assert len(fake_run.calls) == gh.MAX_ATTEMPTS
@@ -349,7 +347,7 @@ def test_fetch_non_transient_failure_does_not_retry(monkeypatch) -> None:
     monkeypatch.setattr(gh, "run_command", fake_run)
 
     with pytest.raises(PlateError, match="authenticated"):
-        github.fetch_events("simon")
+        github.fetch_events("user")
 
     assert len(fake_run.calls) == 1
 
@@ -370,7 +368,7 @@ def test_fetch_paints_progress_on_a_tty(monkeypatch) -> None:
     fake_run, _ = _paged_run([json.dumps([review_event()])])
     monkeypatch.setattr(gh, "run_command", fake_run)
 
-    github.fetch_events("simon")
+    github.fetch_events("user")
 
     assert "Fetching your GitHub events…" in stderr.getvalue()
 
@@ -382,7 +380,7 @@ def test_fetch_paints_retry_progress_on_a_tty(monkeypatch) -> None:
     monkeypatch.setattr(gh, "run_command", fake_run)
     monkeypatch.setattr(gh.time, "sleep", lambda seconds: None)
 
-    github.fetch_events("simon")
+    github.fetch_events("user")
 
     output = stderr.getvalue()
     assert "GitHub answered HTTP 502 — retrying (attempt 2/3)…" in output
@@ -417,7 +415,7 @@ def test_fetch_branch_commits_paints_progress_for_real_jobs_only(monkeypatch) ->
     stderr = _TtyStderr()
     monkeypatch.setattr(sys, "stderr", stderr)
     github.fetch_branch_commits(
-        [("acme/widget", "feat/x"), None], "simon", "2026-06-06T00:00:00Z"
+        [("acme/widget", "feat/x"), None], "user", "2026-06-06T00:00:00Z"
     )
     assert "Listing commits on 1 branch…" in stderr.getvalue()
 
@@ -434,8 +432,8 @@ def test_fetch_is_silent_when_stderr_is_not_a_tty(monkeypatch) -> None:
     )
     monkeypatch.setattr(gh, "run_command", fake_run)
 
-    github.fetch_events("simon")
-    github.fetch_opened("simon", "2026-06-06")
+    github.fetch_events("user")
+    github.fetch_opened("user", "2026-06-06")
     github.fetch_compares([("acme/widget", "a" * 8, "b" * 8)])
 
     assert stderr.getvalue() == ""
@@ -501,7 +499,7 @@ def _stub(
     listings: list[list[dict[str, Any]] | None] | None = None,
     prs: tuple[list[dict[str, Any]], int] = ([], 0),
     closed_prs: tuple[list[dict[str, Any]], int] = ([], 0),
-    login: str | None = "simon",
+    login: str | None = "user",
 ) -> dict[str, Any]:
     calls: dict[str, Any] = {}
     monkeypatch.setattr(gh, "current_login", lambda: login)
@@ -535,14 +533,14 @@ def _stub(
 def test_run_renders_one_panel_per_owner(monkeypatch, capsys) -> None:
     calls = _stub(
         monkeypatch,
-        events=[push_event("acme/widget"), review_event("SimAin/toy")],
+        events=[push_event("acme/widget"), review_event("user/toy")],
         compares=[json.loads(compare_payload())],
     )
     assert cli.main(["retro", "--color", "never"]) == 0
     out = capsys.readouterr().out
     assert "── acme · last 14 days " in out
-    assert "── SimAin · last 14 days " in out
-    assert calls["login"] == "simon"
+    assert "── user · last 14 days " in out
+    assert calls["login"] == "user"
     assert len(calls["since"]) == 10  # YYYY-MM-DD
     assert calls["ranges"] == [("acme/widget", "a" * 8, "b" * 8)]
     assert calls["branches"] == [("acme/widget", "feat/x")]
@@ -653,7 +651,7 @@ def test_run_no_warnings_when_everything_is_covered(monkeypatch, capsys) -> None
 
 
 def test_fetch_failure_surfaces_as_clean_exit(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(gh, "current_login", lambda: "simon")
+    monkeypatch.setattr(gh, "current_login", lambda: "user")
 
     def fake_events(login: str) -> list[dict[str, Any]]:
         raise PlateError("gh failed to fetch your activity")
