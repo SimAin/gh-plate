@@ -220,7 +220,8 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
         return group_by_repo(index)
 
     if args.format == "json":
-        # Nothing fetched needs no login, as the other formats agree.
+        # An empty result never needed the login in the other formats; keep
+        # JSON no stricter.
         rows = (
             [row for _repo, forest in sections_of() for row in flat_rows(forest)]
             if issues

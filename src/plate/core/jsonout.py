@@ -22,7 +22,9 @@ SCHEMA_VERSION = 1
 
 def plain(value: Any) -> Any:
     """``value`` with dataclasses as dicts and tuples as lists, recursively —
-    what :func:`json.dumps` can take without a custom encoder."""
+    what :func:`json.dumps` can take without a custom encoder. Anything else
+    passes through as is, so a model field must already be a JSON type
+    (str/int/bool/None) — a ``datetime`` or ``set`` would fail at ``dumps``."""
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {
             field.name: plain(getattr(value, field.name))

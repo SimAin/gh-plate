@@ -465,9 +465,11 @@ present, null when it doesn't apply to the view:
 ```
 
 - `view` is `assigned` / `owner` / `sprint` for `issues`, `repo` / `owner` for
-  `prs`, `retro` for `retro`. `assignee` is the assignee filter in force (the
-  assigned view, or `--owner --mine`); `sprint` is `{"title": …}` for the
-  sprint view (`null` title when there is no active sprint).
+  `prs`, `retro` for `retro`. `assignee` is the assignee filter in force —
+  your login in the `issues` assigned view and `issues --owner --mine`, null
+  elsewhere (`prs --mine` filters by author, not assignee) and null if your
+  login could not be determined; `sprint` is `{"title": …}` for the sprint
+  view (`null` title when there is no active sprint).
 - `notes` holds the honesty notes the other formats print to stderr
   (truncation, feed coverage, unexpanded pushes) — in this format they go
   here and nowhere else, so a consumer of stdout sees them. Errors still go to

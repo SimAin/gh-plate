@@ -715,8 +715,11 @@ def test_json_repo_view_serialises_the_timeline_strip(
     (row,) = json.loads(capsys.readouterr().out)["data"]["prs"]
     strip = row["timeline"]
     assert len(strip) == 28
-    assert strip[-1] == {"kind": "review", "review_state": "APPROVED", "mine": True}
-    assert all(cell is None for cell in strip[:-1])
+    # The one event is today's — or yesterday's if UTC midnight passed between
+    # the fixture's clock and run()'s; either way it is the only cell.
+    assert [cell for cell in strip if cell] == [
+        {"kind": "review", "review_state": "APPROVED", "mine": True}
+    ]
 
 
 def test_json_owner_view_with_mine_keeps_assignee_null(
