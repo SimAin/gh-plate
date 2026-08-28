@@ -371,12 +371,14 @@ push log — a branch-creating push emits only a `CreateEvent`, and ordinary
 (`repos/{repo}/commits?sha=BRANCH&author=LOGIN&since=WINDOW_START`) and
 unioned with the compare by sha. The listing sees the creation push and
 anything after the last recorded push; the compare sees a branch deleted
-after merge. One extra request per branch, in the same parallel pool.
-Trade-off accepted: the listing returns everything *reachable* from the
-branch tip, not just what you pushed — your commits that landed there via
-someone else's merge now count, and touching both a PR branch and its
-target counts the branch commits *and* their squash (a new sha, so dedup
-cannot fold it).
+after merge. At least one extra request per branch, as a second parallel
+fan-out after the compares. Trade-off accepted: the listing returns
+everything *reachable* from the branch tip, not just what you pushed — your
+commits that landed there via someone else's merge now count, and touching
+both a PR branch and its target counts the branch commits *and* their squash
+(a new sha, so dedup cannot fold it). Still blind: a branch created, merged
+and deleted inside the window with no recorded push is zero unless its
+target branch is also in scope.
 
 **Why not the obvious sources — both probed live and rejected:**
 

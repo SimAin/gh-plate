@@ -218,7 +218,7 @@ def test_fetch_branch_commits_keep_earlier_pages_when_a_later_one_fails(
             return subprocess.CompletedProcess(
                 args, 0, stdout=json.dumps(full), stderr=""
             )
-        return subprocess.CompletedProcess(args, 1, stdout="", stderr="gh: HTTP 500")
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="gh: HTTP 404")
 
     monkeypatch.setattr(gh, "run_command", fake_run)
     (listing,) = github.fetch_branch_commits(
