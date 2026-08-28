@@ -374,9 +374,11 @@ anything after the last recorded push; the compare sees a branch deleted
 after merge. At least one extra request per branch, as a second parallel
 fan-out after the compares. Trade-off accepted: the listing returns
 everything *reachable* from the branch tip, not just what you pushed — your
-commits that landed there via someone else's merge now count, and touching
-both a PR branch and its target counts the branch commits *and* their squash
-(a new sha, so dedup cannot fold it). Still blind: a branch created, merged
+commits that landed there via someone else's merge now count, and any squash
+commit of yours reachable from *any* touched branch (a sibling branched off
+`main` after the merge, not only `main` itself) counts once alongside the
+branch commits it replaced — a new sha, so dedup cannot fold it; the issue
+asked for merges to count, so this is the intended side. Still blind: a branch created, merged
 and deleted inside the window with no recorded push is zero unless its
 target branch is also in scope.
 

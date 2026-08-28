@@ -183,9 +183,10 @@ def collect_commits(
     payload and branch listing, order-aligned with ``groups``.
 
     Keeps commits you authored, deduped by sha across both sources and across
-    branches, stamped with their committer date. A group with neither source
-    falls back to one commit per push on the push's own day — counted, and
-    reported via the second figure so the approximation is never silent.
+    branches, stamped with their committer date. A group whose compare failed
+    and whose listing produced nothing falls back to one commit per push on
+    the push's own day — counted, and reported via the second figure so the
+    approximation is never silent.
     """
     refs: list[tuple[str, Any]] = []
     seen: set[str] = set()
@@ -196,7 +197,7 @@ def collect_commits(
             continue
         compared = compare.get("commits") if isinstance(compare, dict) else None
         sources = [items for items in (compared, listing) if isinstance(items, list)]
-        if not sources:
+        if not isinstance(compared, list) and not listing:
             unexpanded += len(group.push_stamps)
             refs.extend((owner, stamp) for stamp in group.push_stamps)
             continue

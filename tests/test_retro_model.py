@@ -253,6 +253,14 @@ def test_listing_covers_a_branch_whose_compare_failed() -> None:
     assert unexpanded == 0
 
 
+def test_an_empty_listing_does_not_rescue_a_failed_compare() -> None:
+    # The branch exists but its tip carries none of your commits (reset by a
+    # teammate, unlinked email): still an approximation, still reported.
+    refs, unexpanded = model.collect_commits([_group([0, 3])], [None], [[]], "simon")
+    assert refs == [("acme", _iso(0)), ("acme", _iso(3))]
+    assert unexpanded == 2
+
+
 def test_both_sources_failing_falls_back_to_one_commit_per_push() -> None:
     refs, unexpanded = model.collect_commits([_group([0, 3])], [None], [None], "simon")
     assert refs == [("acme", _iso(0)), ("acme", _iso(3))]
