@@ -53,6 +53,10 @@ class RetroSection:
 
 
 BRANCH_REF_PREFIX = "refs/heads/"
+# The committer GitHub stamps on commits it creates on your behalf — squash
+# and rebase merges (copies of work already counted on the branch, dated the
+# day it merged) and merge commits. Also web-editor commits, accepted.
+GITHUB_COMMITTER_EMAIL = "noreply@github.com"
 
 
 @dataclass(frozen=True)
@@ -182,11 +186,14 @@ def collect_commits(
     """``(commit refs, unexpanded push count)`` from each group's compare
     payload and branch listing, order-aligned with ``groups``.
 
-    Keeps commits you authored, deduped by sha across both sources and across
-    branches, stamped with their committer date. A group whose compare failed
-    and whose listing produced nothing falls back to one commit per push on
-    the push's own day — counted, and reported via the second figure so the
-    approximation is never silent.
+    Keeps commits you authored and committed, deduped by sha across both
+    sources and across branches, stamped with their committer date. Commits
+    GitHub committed for you (squash, rebase and merge commits) are skipped:
+    the work is already counted on its branch, and its landing is the
+    ``closed`` channel's. A group whose compare failed and whose listing
+    produced nothing falls back to one commit per push on the push's own
+    day — counted, and reported via the second figure so the approximation
+    is never silent.
     """
     refs: list[tuple[str, Any]] = []
     seen: set[str] = set()
@@ -214,8 +221,11 @@ def collect_commits(
                 seen.add(sha)
             commit = item.get("commit")
             committer = commit.get("committer") if isinstance(commit, dict) else None
-            date = committer.get("date") if isinstance(committer, dict) else None
-            refs.append((owner, date))
+            if not isinstance(committer, dict):
+                committer = {}
+            if committer.get("email") == GITHUB_COMMITTER_EMAIL:
+                continue
+            refs.append((owner, committer.get("date")))
     return refs, unexpanded
 
 

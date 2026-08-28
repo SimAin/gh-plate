@@ -71,12 +71,15 @@ def create(
 
 
 def compare_commit(
-    days_ago: int, login: str = "simon", sha: str = ""
+    days_ago: int,
+    login: str = "simon",
+    sha: str = "",
+    committer_email: str = "simon@example.com",
 ) -> dict[str, Any]:
     return {
         "sha": sha or f"sha-{days_ago}-{login}",
         "author": {"login": login},
-        "commit": {"committer": {"date": _iso(days_ago)}},
+        "commit": {"committer": {"date": _iso(days_ago), "email": committer_email}},
     }
 
 
@@ -206,6 +209,30 @@ def test_compare_keeps_only_your_commits_with_their_dates() -> None:
     refs, unexpanded = model.collect_commits([_group([0])], [compare], [None], "simon")
     assert refs == [("acme", _iso(1))]
     assert unexpanded == 0
+
+
+def test_commits_github_made_for_you_are_not_counted() -> None:
+    # A squash merge: authored by you, committed by GitHub on merge day. The
+    # branch commits were already counted; the landing is the closed row's.
+    squash = compare_commit(
+        0, sha="squash", committer_email=model.GITHUB_COMMITTER_EMAIL
+    )
+    refs, unexpanded = model.collect_commits(
+        [_group([0]), _group([0], ref="refs/heads/main")],
+        [{"commits": [compare_commit(2)]}, {"commits": [squash]}],
+        [None, [squash]],
+        "simon",
+    )
+    assert refs == [("acme", _iso(2))]
+    assert unexpanded == 0
+
+
+def test_a_commit_without_committer_details_still_counts() -> None:
+    bare = {"sha": "bare", "author": {"login": "simon"}, "commit": {}}
+    refs, _ = model.collect_commits(
+        [_group([0])], [{"commits": [bare]}], [None], "simon"
+    )
+    assert refs == [("acme", None)]  # dropped later by the date parser, not here
 
 
 def test_compare_dedupes_shas_across_branches() -> None:

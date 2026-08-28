@@ -372,15 +372,17 @@ push log — a branch-creating push emits only a `CreateEvent`, and ordinary
 unioned with the compare by sha. The listing sees the creation push and
 anything after the last recorded push; the compare sees a branch deleted
 after merge. At least one extra request per branch, as a second parallel
-fan-out after the compares. Trade-off accepted: the listing returns
-everything *reachable* from the branch tip, not just what you pushed — your
-commits that landed there via someone else's merge now count, and any squash
-commit of yours reachable from *any* touched branch (a sibling branched off
-`main` after the merge, not only `main` itself) counts once alongside the
-branch commits it replaced — a new sha, so dedup cannot fold it; the issue
-asked for merges to count, so this is the intended side. Still blind: a branch created, merged
-and deleted inside the window with no recorded push is zero unless its
-target branch is also in scope.
+fan-out after the compares. The listing returns everything *reachable* from
+the branch tip, not just what you pushed — so your commits that landed there
+via someone else's merge now count, and so would every squash or rebase
+merge of yours reachable from any touched branch: a new sha on **merge day**,
+the day this channel is designed not to move on, duplicating work already
+counted on the branch and a landing the `closed` row already shows. So
+**commits GitHub committed for you are skipped** on both paths (committer
+`noreply@github.com` — squash, rebase and merge commits); the cost is that
+commits made in the github.com file editor share that committer and drop
+too. Still blind: a branch created, merged and deleted inside the window
+with no recorded push is zero unless its target branch is also in scope.
 
 **Why not the obvious sources — both probed live and rejected:**
 
