@@ -125,7 +125,7 @@ def test_repo_view_reports_a_broken_config(monkeypatch, tmp_path, capsys) -> Non
     # accepts --config and ignores it.
     path = tmp_path / "config.json"
     path.write_text("{not json", encoding="utf-8")
-    _stub_fetch(monkeypatch, prs=[_pr(1)], login="simon")
+    _stub_fetch(monkeypatch, prs=[_pr(1)], login="user")
     assert cli.main(["prs", "--repo", "acme/widget", "--config", str(path)]) == 1
     assert "Could not read config at" in capsys.readouterr().err
 
@@ -134,7 +134,7 @@ def test_repo_view_tolerates_a_config_that_is_not_there(
     monkeypatch, tmp_path, capsys
 ) -> None:
     # The loader's own rule: a named file that doesn't exist means defaults.
-    _stub_fetch(monkeypatch, prs=[_pr(1)], login="simon")
+    _stub_fetch(monkeypatch, prs=[_pr(1)], login="user")
     missing = tmp_path / "nope.json"
     assert cli.main(["prs", "--repo", "acme/widget", "--config", str(missing)]) == 0
 
@@ -155,7 +155,7 @@ def test_config_file_supplies_owner_alias(
 
 
 def test_empty_message(monkeypatch, capsys) -> None:
-    _stub_fetch(monkeypatch, prs=[], login="simon")
+    _stub_fetch(monkeypatch, prs=[], login="user")
     assert cli.main(["prs", "--repo", "acme/widget"]) == 0
     assert "No open PRs found for acme/widget." in capsys.readouterr().out
 
@@ -164,14 +164,14 @@ def test_repo_defaults_to_current_repo(monkeypatch, capsys) -> None:
     from plate.core import gh
 
     monkeypatch.setattr(gh, "current_repo", lambda: "acme/widget")
-    calls = _stub_fetch(monkeypatch, prs=[], login="simon")
+    calls = _stub_fetch(monkeypatch, prs=[], login="user")
     assert cli.main(["prs"]) == 0
     assert calls["repo"] == "acme/widget"
 
 
 def test_grouping_order_in_output(monkeypatch, capsys) -> None:
     prs = [
-        _pr(1, "Mine", author="simon"),
+        _pr(1, "Mine", author="user"),
         _pr(2, "Needs my review", author="alice"),
         _pr(
             3,
@@ -181,7 +181,7 @@ def test_grouping_order_in_output(monkeypatch, capsys) -> None:
             review_decision="APPROVED",
         ),
     ]
-    _stub_fetch(monkeypatch, prs=prs, login="simon")
+    _stub_fetch(monkeypatch, prs=prs, login="user")
     assert cli.main(["prs", "--repo", "acme/widget", "--color", "never"]) == 0
     out = capsys.readouterr().out
 
@@ -198,8 +198,8 @@ def test_grouping_order_in_output(monkeypatch, capsys) -> None:
 
 
 def test_summary_line_present(monkeypatch, capsys) -> None:
-    prs = [_pr(1, "Mine", author="simon"), _pr(2, "Review this", author="alice")]
-    _stub_fetch(monkeypatch, prs=prs, login="simon")
+    prs = [_pr(1, "Mine", author="user"), _pr(2, "Review this", author="alice")]
+    _stub_fetch(monkeypatch, prs=prs, login="user")
     assert cli.main(["prs", "--repo", "acme/widget", "--color", "never"]) == 0
     out = capsys.readouterr().out
     assert "2 open" in out
@@ -207,8 +207,8 @@ def test_summary_line_present(monkeypatch, capsys) -> None:
 
 
 def test_markdown_format(monkeypatch, capsys) -> None:
-    prs = [_pr(1, "Mine", author="simon")]
-    _stub_fetch(monkeypatch, prs=prs, login="simon")
+    prs = [_pr(1, "Mine", author="user")]
+    _stub_fetch(monkeypatch, prs=prs, login="user")
     assert cli.main(["prs", "--repo", "acme/widget", "--format", "markdown"]) == 0
     out = capsys.readouterr().out
     assert "| PR ID | Title |" in out
@@ -217,8 +217,8 @@ def test_markdown_format(monkeypatch, capsys) -> None:
 
 
 def test_show_key_prints_key(monkeypatch, capsys) -> None:
-    prs = [_pr(1, "Mine", author="simon")]
-    _stub_fetch(monkeypatch, prs=prs, login="simon")
+    prs = [_pr(1, "Mine", author="user")]
+    _stub_fetch(monkeypatch, prs=prs, login="user")
     assert (
         cli.main(["prs", "--repo", "acme/widget", "--show-key", "--color", "never"])
         == 0
@@ -229,16 +229,16 @@ def test_show_key_prints_key(monkeypatch, capsys) -> None:
 
 
 def test_limit_hit_note(monkeypatch, capsys) -> None:
-    prs = [_pr(1, "Mine", author="simon")]
-    _stub_fetch(monkeypatch, prs=prs, login="simon")
+    prs = [_pr(1, "Mine", author="user")]
+    _stub_fetch(monkeypatch, prs=prs, login="user")
     assert cli.main(["prs", "--repo", "acme/widget", "--limit", "1"]) == 0
     err = capsys.readouterr().err
     assert "fetched 1 open PRs; there may be more not shown." in err
 
 
 def test_no_limit_note_when_under_limit(monkeypatch, capsys) -> None:
-    prs = [_pr(1, "Mine", author="simon")]
-    _stub_fetch(monkeypatch, prs=prs, login="simon")
+    prs = [_pr(1, "Mine", author="user")]
+    _stub_fetch(monkeypatch, prs=prs, login="user")
     assert cli.main(["prs", "--repo", "acme/widget", "--limit", "5"]) == 0
     assert "Note:" not in capsys.readouterr().err
 
@@ -252,8 +252,8 @@ def test_missing_login_note(monkeypatch, capsys) -> None:
 
 
 def test_no_missing_login_note_when_login_known(monkeypatch, capsys) -> None:
-    prs = [_pr(1, "Mine", author="simon")]
-    _stub_fetch(monkeypatch, prs=prs, login="simon")
+    prs = [_pr(1, "Mine", author="user")]
+    _stub_fetch(monkeypatch, prs=prs, login="user")
     assert cli.main(["prs", "--repo", "acme/widget"]) == 0
     assert "could not be grouped" not in capsys.readouterr().err
 
@@ -555,9 +555,7 @@ def test_owner_summary_line_present(monkeypatch, capsys, run_with_config) -> Non
 
 
 def test_timeline_flag_reaches_fetch_and_output(monkeypatch, capsys) -> None:
-    calls = _stub_fetch(
-        monkeypatch, prs=[_pr(1, "Mine", author="simon")], login="simon"
-    )
+    calls = _stub_fetch(monkeypatch, prs=[_pr(1, "Mine", author="user")], login="user")
     assert (
         cli.main(["prs", "--repo", "acme/widget", "--timeline", "--color", "never"])
         == 0
@@ -567,18 +565,14 @@ def test_timeline_flag_reaches_fetch_and_output(monkeypatch, capsys) -> None:
 
 
 def test_timeline_off_by_default(monkeypatch, capsys) -> None:
-    calls = _stub_fetch(
-        monkeypatch, prs=[_pr(1, "Mine", author="simon")], login="simon"
-    )
+    calls = _stub_fetch(monkeypatch, prs=[_pr(1, "Mine", author="user")], login="user")
     assert cli.main(["prs", "--repo", "acme/widget", "--color", "never"]) == 0
     assert calls["timeline"] is False
     assert "↳" not in capsys.readouterr().out
 
 
 def test_timeline_ignored_for_markdown(monkeypatch, capsys) -> None:
-    calls = _stub_fetch(
-        monkeypatch, prs=[_pr(1, "Mine", author="simon")], login="simon"
-    )
+    calls = _stub_fetch(monkeypatch, prs=[_pr(1, "Mine", author="user")], login="user")
     assert (
         cli.main(["prs", "--repo", "acme/widget", "--timeline", "--format", "markdown"])
         == 0
@@ -596,7 +590,7 @@ def test_timeline_with_owner_errors() -> None:
 
 
 def test_show_key_teaches_strip_with_timeline(monkeypatch, capsys) -> None:
-    _stub_fetch(monkeypatch, prs=[_pr(1, "Mine", author="simon")], login="simon")
+    _stub_fetch(monkeypatch, prs=[_pr(1, "Mine", author="user")], login="user")
     assert (
         cli.main(
             [

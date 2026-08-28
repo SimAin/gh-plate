@@ -72,9 +72,9 @@ def create(
 
 def compare_commit(
     days_ago: int,
-    login: str = "simon",
+    login: str = "user",
     sha: str = "",
-    committer_email: str = "simon@example.com",
+    committer_email: str = "user@example.com",
 ) -> dict[str, Any]:
     return {
         "sha": sha or f"sha-{days_ago}-{login}",
@@ -206,7 +206,7 @@ def test_compare_keeps_only_your_commits_with_their_dates() -> None:
             {"sha": "s", "author": None, "commit": {}},
         ]
     }
-    refs, unexpanded = model.collect_commits([_group([0])], [compare], [None], "simon")
+    refs, unexpanded = model.collect_commits([_group([0])], [compare], [None], "user")
     assert refs == [("acme", _iso(1))]
     assert unexpanded == 0
 
@@ -221,16 +221,16 @@ def test_commits_github_made_for_you_are_not_counted() -> None:
         [_group([0]), _group([0], ref="refs/heads/main")],
         [{"commits": [compare_commit(2)]}, {"commits": [squash]}],
         [None, [squash]],
-        "simon",
+        "user",
     )
     assert refs == [("acme", _iso(2))]
     assert unexpanded == 0
 
 
 def test_a_commit_without_committer_details_still_counts() -> None:
-    bare = {"sha": "bare", "author": {"login": "simon"}, "commit": {}}
+    bare = {"sha": "bare", "author": {"login": "user"}, "commit": {}}
     refs, _ = model.collect_commits(
-        [_group([0])], [{"commits": [bare]}], [None], "simon"
+        [_group([0])], [{"commits": [bare]}], [None], "user"
     )
     assert refs == [("acme", None)]  # dropped later by the date parser, not here
 
@@ -241,7 +241,7 @@ def test_compare_dedupes_shas_across_branches() -> None:
         [_group([0]), _group([0], ref="refs/heads/feat/y")],
         [{"commits": [shared]}, {"commits": [shared]}],
         [None, None],
-        "simon",
+        "user",
     )
     assert len(refs) == 1
 
@@ -258,7 +258,7 @@ def test_listing_adds_commits_the_compare_missed_and_dedupes_shared_shas() -> No
                 compare_commit(1, login="alice"),
             ]
         ],
-        "simon",
+        "user",
     )
     assert refs == [("acme", _iso(2)), ("acme", _iso(1))]
     assert unexpanded == 0
@@ -266,7 +266,7 @@ def test_listing_adds_commits_the_compare_missed_and_dedupes_shared_shas() -> No
 
 def test_listing_alone_counts_a_created_branch() -> None:
     refs, unexpanded = model.collect_commits(
-        [_group([])], [None], [[compare_commit(0)]], "simon"
+        [_group([])], [None], [[compare_commit(0)]], "user"
     )
     assert refs == [("acme", _iso(0))]
     assert unexpanded == 0
@@ -274,7 +274,7 @@ def test_listing_alone_counts_a_created_branch() -> None:
 
 def test_listing_covers_a_branch_whose_compare_failed() -> None:
     refs, unexpanded = model.collect_commits(
-        [_group([0, 3])], [None], [[compare_commit(1)]], "simon"
+        [_group([0, 3])], [None], [[compare_commit(1)]], "user"
     )
     assert refs == [("acme", _iso(1))]  # the real commits, not one per push
     assert unexpanded == 0
@@ -283,13 +283,13 @@ def test_listing_covers_a_branch_whose_compare_failed() -> None:
 def test_an_empty_listing_does_not_rescue_a_failed_compare() -> None:
     # The branch exists but its tip carries none of your commits (reset by a
     # teammate, unlinked email): still an approximation, still reported.
-    refs, unexpanded = model.collect_commits([_group([0, 3])], [None], [[]], "simon")
+    refs, unexpanded = model.collect_commits([_group([0, 3])], [None], [[]], "user")
     assert refs == [("acme", _iso(0)), ("acme", _iso(3))]
     assert unexpanded == 2
 
 
 def test_both_sources_failing_falls_back_to_one_commit_per_push() -> None:
-    refs, unexpanded = model.collect_commits([_group([0, 3])], [None], [None], "simon")
+    refs, unexpanded = model.collect_commits([_group([0, 3])], [None], [None], "user")
     assert refs == [("acme", _iso(0)), ("acme", _iso(3))]
     assert unexpanded == 2
     note = model.unexpanded_note(unexpanded)
@@ -299,7 +299,7 @@ def test_both_sources_failing_falls_back_to_one_commit_per_push() -> None:
 
 def test_a_created_branch_nobody_could_list_is_silently_empty() -> None:
     # No pushes were recorded, so there is nothing to approximate or report.
-    assert model.collect_commits([_group([])], [None], [None], "simon") == ([], 0)
+    assert model.collect_commits([_group([])], [None], [None], "user") == ([], 0)
 
 
 # --- build_sections ----------------------------------------------------------------
@@ -317,11 +317,11 @@ def test_channels_come_in_display_order() -> None:
 
 def test_activity_splits_by_repository_owner() -> None:
     built = sections(
-        commits=[commit_ref(1, "acme"), commit_ref(2, "SimAin")],
+        commits=[commit_ref(1, "acme"), commit_ref(2, "user")],
         prs=[opened(1, "acme/widget")],
         events=[review(0, "acme/gadget")],
     )
-    assert [section.owner for section in built] == ["acme", "SimAin"]
+    assert [section.owner for section in built] == ["acme", "user"]
     acme = {c.label: c for c in built[0].channels}
     personal = {c.label: c for c in built[1].channels}
     assert acme["commits"].total == 1
@@ -405,10 +405,8 @@ def test_pr_opened_and_closed_in_window_counts_once_in_each() -> None:
 
 
 def test_closed_prs_attribute_to_their_repository_owner() -> None:
-    built = sections(
-        closed_prs=[closed(1, "acme/widget"), closed(2, "SimAin/personal")]
-    )
-    assert [section.owner for section in built] == ["acme", "SimAin"]
+    built = sections(closed_prs=[closed(1, "acme/widget"), closed(2, "user/personal")])
+    assert [section.owner for section in built] == ["acme", "user"]
     for section in built:
         labelled = {c.label: c for c in section.channels}
         assert labelled["closed"].total == 1

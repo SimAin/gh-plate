@@ -50,19 +50,19 @@ def pr_rows() -> list[prs_model.PrRow]:
         pr_node(
             41,
             "Add width-aware truncation",
-            ["simon"],
+            ["user"],
             review_decision="APPROVED",
             rollup="SUCCESS",
             created_at="2026-06-12T09:00:00Z",
-            last_commit=("2026-06-18T09:00:00Z", "simon"),
+            last_commit=("2026-06-18T09:00:00Z", "user"),
         ),
         pr_node(
             37,
             "Rework the sprint buckets",
-            ["simon"],
+            ["user"],
             rollup="FAILURE",
             created_at="2026-05-20T09:00:00Z",
-            last_commit=("2026-06-05T09:00:00Z", "simon"),
+            last_commit=("2026-06-05T09:00:00Z", "user"),
         ),
         pr_node(
             35,
@@ -93,7 +93,7 @@ def pr_rows() -> list[prs_model.PrRow]:
         ),
     ]
     return prs_model.normalize_rows(
-        nodes, "simon", now=NOW_PR, stale_days=14, repo="acme/widget"
+        nodes, "user", now=NOW_PR, stale_days=14, repo="acme/widget"
     )
 
 
@@ -148,7 +148,7 @@ RETRO_TWO_OWNERS = """\
    commits     ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  2    2   today
    opened      ·  ·  ·  ·  ·  ·  ·  ·  2  ·  ·  ·  ·  ·    2   last 5d ago
    closed      ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·    0   none in 14d
-── SimAin · last 14 days ─────────────────────────────────────────────────
+── user · last 14 days ───────────────────────────────────────────────────
                S  S  M  T  W  T  F  S  S  M  T  W  T  F    Σ
    reviews     ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·    0   none in 14d
    commits     ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  2    2   today
@@ -189,7 +189,7 @@ def test_retro_panel_one_owner() -> None:
 
 
 def test_retro_panel_two_owners() -> None:
-    sections = [section("acme"), section("SimAin", reviews_last=None)]
+    sections = [section("acme"), section("user", reviews_last=None)]
     assert retro_render.panel(sections, DAYS, NOW, use_color=False) == (
         RETRO_TWO_OWNERS
     )
