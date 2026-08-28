@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import io
 import os
 import sys
@@ -74,16 +75,47 @@ def test_defaults_when_not_given() -> None:
     assert args.stale_days == issues_cli.DEFAULT_STALE_DAYS
 
 
+# --- shared flags (plate.core.flags) -----------------------------------------
+
+
+def _flag_names(subcommand: str) -> set[str]:
+    """Every option string the ``subcommand`` subparser accepts."""
+    subparsers = next(
+        action
+        for action in cli._build_parser()._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    parser = subparsers.choices[subcommand]
+    return {opt for action in parser._actions for opt in action.option_strings}
+
+
+def test_output_flags_are_mounted_on_every_subcommand() -> None:
+    for subcommand in ("issues", "prs", "retro"):
+        assert {"--format", "--color"} <= _flag_names(subcommand)
+
+
+def test_config_flags_are_mounted_only_where_the_config_is_read() -> None:
+    for subcommand in ("issues", "prs"):
+        assert {"--config", "--config-path"} <= _flag_names(subcommand)
+    assert not {"--config", "--config-path"} & _flag_names("retro")
+
+
+def test_retro_rejects_config_flag(capsys) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        cli.parse_args(["retro", "--config", "/tmp/plate.json"])
+    assert excinfo.value.code == 2
+    assert "--config" in capsys.readouterr().err
+
+
 def test_config_path_flag_prints_explicit_config_and_exits_zero(capsys) -> None:
-    # Returns before any config load or gh call — nothing is stubbed here.
-    args = cli.parse_args(["issues", "--config-path", "--config", "/tmp/plate.json"])
-    assert issues_cli.run(args) == 0
+    # main() returns before any config load or gh call — nothing is stubbed here.
+    assert cli.main(["issues", "--config-path", "--config", "/tmp/plate.json"]) == 0
     assert capsys.readouterr().out.strip() == "/tmp/plate.json"
 
 
 def test_config_path_flag_defaults_to_resolved_location(monkeypatch, capsys) -> None:
     monkeypatch.setattr(config, "config_path", lambda: "/somewhere/config.json")
-    assert issues_cli.run(cli.parse_args(["issues", "--config-path"])) == 0
+    assert cli.main(["issues", "--config-path"]) == 0
     assert capsys.readouterr().out.strip() == "/somewhere/config.json"
 
 
@@ -161,39 +193,54 @@ def test_owner_and_repo_are_mutually_exclusive(capsys) -> None:
 
 def test_mine_without_owner_errors() -> None:
     with pytest.raises(PlateError) as excinfo:
-        issues_cli.run(cli.parse_args(["issues", "--mine"]))
+        issues_cli.run(cli.parse_args(["issues", "--mine"]), config.Config())
     assert "--mine only applies with --owner" in str(excinfo.value)
 
 
 def test_sprint_with_owner_errors() -> None:
     with pytest.raises(PlateError) as excinfo:
-        issues_cli.run(cli.parse_args(["issues", "--owner", "an-org", "--sprint"]))
+        issues_cli.run(
+            cli.parse_args(["issues", "--owner", "an-org", "--sprint"]), config.Config()
+        )
     assert "--sprint is per-repo" in str(excinfo.value)
 
 
-def test_owner_flow_never_calls_current_repo(monkeypatch, capsys) -> None:
+def test_owner_flow_never_calls_current_repo(
+    monkeypatch, capsys, run_with_config
+) -> None:
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
     # _boom_current_repo would raise if the owner path touched it.
-    assert issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
+    assert (
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--owner", "an-org"]))
+        == 0
+    )
     assert "repo-a" in capsys.readouterr().out
 
 
-def test_owner_alias_resolves_and_shows_arrow(monkeypatch, capsys) -> None:
+def test_owner_alias_resolves_and_shows_arrow(
+    monkeypatch, capsys, run_with_config
+) -> None:
     cfg = config.Config(owners={"work": "company-org"})
     calls = _stub_owner(monkeypatch, issues=[_issue(1)], total=1, cfg=cfg)
-    assert issues_cli.run(cli.parse_args(["issues", "--owner", "work"])) == 0
+    assert (
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--owner", "work"]))
+        == 0
+    )
     assert calls["owner"] == "company-org"  # fetch got the resolved name
     assert "work → company-org" in capsys.readouterr().out
 
 
-def test_owner_literal_shows_no_arrow(monkeypatch, capsys) -> None:
+def test_owner_literal_shows_no_arrow(monkeypatch, capsys, run_with_config) -> None:
     calls = _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
-    assert issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
+    assert (
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--owner", "an-org"]))
+        == 0
+    )
     assert calls["owner"] == "an-org"
     assert "→" not in capsys.readouterr().out
 
 
-def test_owner_type_failure_lists_aliases(monkeypatch, capsys) -> None:
+def test_owner_type_failure_lists_aliases(monkeypatch, capsys, run_with_config) -> None:
     cfg = config.Config(owners={"work": "company-org", "personal": "my-org"})
     _stub_owner(monkeypatch, issues=[], total=0, cfg=cfg)
 
@@ -202,14 +249,16 @@ def test_owner_type_failure_lists_aliases(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr(gh, "resolve_owner_type", fail)
     with pytest.raises(PlateError) as excinfo:
-        issues_cli.run(cli.parse_args(["issues", "--owner", "typo"]))
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--owner", "typo"]))
     message = str(excinfo.value)
     assert "Configured aliases:" in message
     assert "work → company-org" in message
     assert "personal → my-org" in message
 
 
-def test_owner_type_failure_without_aliases_has_no_alias_line(monkeypatch) -> None:
+def test_owner_type_failure_without_aliases_has_no_alias_line(
+    monkeypatch, run_with_config
+) -> None:
     _stub_owner(monkeypatch, issues=[], total=0)
 
     def fail(owner: str) -> str:
@@ -217,93 +266,120 @@ def test_owner_type_failure_without_aliases_has_no_alias_line(monkeypatch) -> No
 
     monkeypatch.setattr(gh, "resolve_owner_type", fail)
     with pytest.raises(PlateError) as excinfo:
-        issues_cli.run(cli.parse_args(["issues", "--owner", "nope"]))
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--owner", "nope"]))
     assert "Configured aliases:" not in str(excinfo.value)
 
 
-def test_owner_empty_default_message(monkeypatch, capsys) -> None:
+def test_owner_empty_default_message(monkeypatch, capsys, run_with_config) -> None:
     _stub_owner(monkeypatch, issues=[], total=0)
-    assert issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
+    assert (
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--owner", "an-org"]))
+        == 0
+    )
     assert "No open issues found for an-org." in capsys.readouterr().out
 
 
-def test_owner_empty_mine_message(monkeypatch, capsys) -> None:
+def test_owner_empty_mine_message(monkeypatch, capsys, run_with_config) -> None:
     calls = _stub_owner(monkeypatch, issues=[], total=0)
     assert (
-        issues_cli.run(cli.parse_args(["issues", "--owner", "an-org", "--mine"])) == 0
+        run_with_config(
+            issues_cli.run, cli.parse_args(["issues", "--owner", "an-org", "--mine"])
+        )
+        == 0
     )
     assert calls["assignee"] == "@me"
     assert "No open issues assigned to you for an-org." in capsys.readouterr().out
 
 
-def test_owner_default_searches_without_assignee(monkeypatch) -> None:
+def test_owner_default_searches_without_assignee(monkeypatch, run_with_config) -> None:
     calls = _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
-    assert issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
+    assert (
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--owner", "an-org"]))
+        == 0
+    )
     assert calls["assignee"] is None
 
 
-def test_owner_viewer_missing_raises_login_error(monkeypatch) -> None:
+def test_owner_viewer_missing_raises_login_error(monkeypatch, run_with_config) -> None:
     # The login for yours/others grouping rides on the fetch itself; when the
     # response somehow lacks it, the old actionable auth error must survive.
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1, viewer=None)
     with pytest.raises(PlateError) as excinfo:
-        issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"]))
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--owner", "an-org"]))
     assert "Could not determine your GitHub login" in str(excinfo.value)
 
 
 def test_owner_viewer_missing_with_empty_result_still_reports(
-    monkeypatch, capsys
+    monkeypatch, capsys, run_with_config
 ) -> None:
     # An empty result needs no grouping, so no login is required to say so.
     _stub_owner(monkeypatch, issues=[], total=0, viewer=None)
-    assert issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
+    assert (
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--owner", "an-org"]))
+        == 0
+    )
     assert "No open issues found for an-org." in capsys.readouterr().out
 
 
-def test_owner_truncation_note_limit_hit(monkeypatch, capsys) -> None:
+def test_owner_truncation_note_limit_hit(monkeypatch, capsys, run_with_config) -> None:
     issues = [_issue(n) for n in range(1, 3)]
     _stub_owner(monkeypatch, issues=issues, total=5)
     assert (
-        issues_cli.run(cli.parse_args(["issues", "--owner", "an-org", "--limit", "2"]))
+        run_with_config(
+            issues_cli.run,
+            cli.parse_args(["issues", "--owner", "an-org", "--limit", "2"]),
+        )
         == 0
     )
     err = capsys.readouterr().err
     assert "showing 2 of 5 open issues for an-org (--limit 2)." in err
 
 
-def test_owner_truncation_note_search_ceiling(monkeypatch, capsys) -> None:
+def test_owner_truncation_note_search_ceiling(
+    monkeypatch, capsys, run_with_config
+) -> None:
     issues = [_issue(n) for n in range(1, 4)]
     _stub_owner(monkeypatch, issues=issues, total=1500)
-    assert issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
+    assert (
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--owner", "an-org"]))
+        == 0
+    )
     err = capsys.readouterr().err
     assert "at most 1000 results per query" in err
     assert "showing 3 of 1500 open issues for an-org" in err
 
 
-def test_owner_no_note_when_complete(monkeypatch, capsys) -> None:
+def test_owner_no_note_when_complete(monkeypatch, capsys, run_with_config) -> None:
     issues = [_issue(1), _issue(2)]
     _stub_owner(monkeypatch, issues=issues, total=2)
-    assert issues_cli.run(cli.parse_args(["issues", "--owner", "an-org"])) == 0
+    assert (
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--owner", "an-org"]))
+        == 0
+    )
     assert "Note:" not in capsys.readouterr().err
 
 
-def test_owner_markdown_format(monkeypatch, capsys) -> None:
+def test_owner_markdown_format(monkeypatch, capsys, run_with_config) -> None:
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
     assert (
-        issues_cli.run(
-            cli.parse_args(["issues", "--owner", "an-org", "--format", "markdown"])
+        run_with_config(
+            issues_cli.run,
+            cli.parse_args(["issues", "--owner", "an-org", "--format", "markdown"]),
         )
         == 0
     )
     assert "## an-org/repo-a" in capsys.readouterr().out
 
 
-def test_owner_markdown_alias_shows_display_line(monkeypatch, capsys) -> None:
+def test_owner_markdown_alias_shows_display_line(
+    monkeypatch, capsys, run_with_config
+) -> None:
     cfg = config.Config(owners={"work": "company-org"})
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1, cfg=cfg)
     assert (
-        issues_cli.run(
-            cli.parse_args(["issues", "--owner", "work", "--format", "markdown"])
+        run_with_config(
+            issues_cli.run,
+            cli.parse_args(["issues", "--owner", "work", "--format", "markdown"]),
         )
         == 0
     )
@@ -312,10 +388,13 @@ def test_owner_markdown_alias_shows_display_line(monkeypatch, capsys) -> None:
     assert "## an-org/repo-a" in out
 
 
-def test_owner_show_key_prints_owner_key(monkeypatch, capsys) -> None:
+def test_owner_show_key_prints_owner_key(monkeypatch, capsys, run_with_config) -> None:
     _stub_owner(monkeypatch, issues=[_issue(1)], total=1)
     assert (
-        issues_cli.run(cli.parse_args(["issues", "--owner", "an-org", "--show-key"]))
+        run_with_config(
+            issues_cli.run,
+            cli.parse_args(["issues", "--owner", "an-org", "--show-key"]),
+        )
         == 0
     )
     out = capsys.readouterr().out
@@ -349,56 +428,75 @@ def _stub_yours(
     return calls
 
 
-def test_yours_flow_never_calls_current_login(monkeypatch, capsys) -> None:
+def test_yours_flow_never_calls_current_login(
+    monkeypatch, capsys, run_with_config
+) -> None:
     # _boom_current_login would raise if the hot path still did the gh api
     # user round trip; assignee:@me makes the concrete login unnecessary.
     calls = _stub_yours(monkeypatch, issues=[_issue(1)], total=1)
-    assert issues_cli.run(cli.parse_args(["issues"])) == 0
+    assert run_with_config(issues_cli.run, cli.parse_args(["issues"])) == 0
     assert calls["repo"] == "an-org/a-repo"
     assert "Issue 1" in capsys.readouterr().out
 
 
-def test_yours_renders_even_without_viewer(monkeypatch, capsys) -> None:
+def test_yours_renders_even_without_viewer(
+    monkeypatch, capsys, run_with_config
+) -> None:
     # The yours view groups nothing by login, so a missing viewer is inert.
     _stub_yours(monkeypatch, issues=[_issue(1)], total=1, viewer=None)
-    assert issues_cli.run(cli.parse_args(["issues"])) == 0
+    assert run_with_config(issues_cli.run, cli.parse_args(["issues"])) == 0
     assert "Issue 1" in capsys.readouterr().out
 
 
-def test_yours_empty_prints_message(monkeypatch, capsys) -> None:
+def test_yours_empty_prints_message(monkeypatch, capsys, run_with_config) -> None:
     _stub_yours(monkeypatch, issues=[], total=0)
-    assert issues_cli.run(cli.parse_args(["issues"])) == 0
+    assert run_with_config(issues_cli.run, cli.parse_args(["issues"])) == 0
     out = capsys.readouterr().out
     assert "No open issues assigned to you in an-org/a-repo." in out
 
 
-def test_yours_markdown_format(monkeypatch, capsys) -> None:
+def test_yours_markdown_format(monkeypatch, capsys, run_with_config) -> None:
     _stub_yours(monkeypatch, issues=[_issue(1)], total=1)
-    assert issues_cli.run(cli.parse_args(["issues", "--format", "markdown"])) == 0
+    assert (
+        run_with_config(
+            issues_cli.run, cli.parse_args(["issues", "--format", "markdown"])
+        )
+        == 0
+    )
     out = capsys.readouterr().out
     assert "[#1](https://github.com/an-org/repo-a/issues/1)" in out
     assert "Issue 1" in out
 
 
-def test_yours_show_key_prints_key(monkeypatch, capsys) -> None:
+def test_yours_show_key_prints_key(monkeypatch, capsys, run_with_config) -> None:
     _stub_yours(monkeypatch, issues=[_issue(1)], total=1)
-    assert issues_cli.run(cli.parse_args(["issues", "--show-key"])) == 0
+    assert (
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--show-key"])) == 0
+    )
     out = capsys.readouterr().out
     assert "Key" in out
     assert "Issue 1" in out
 
 
-def test_yours_truncation_note_goes_to_stderr(monkeypatch, capsys) -> None:
+def test_yours_truncation_note_goes_to_stderr(
+    monkeypatch, capsys, run_with_config
+) -> None:
     _stub_yours(monkeypatch, issues=[_issue(1), _issue(2)], total=5)
-    assert issues_cli.run(cli.parse_args(["issues", "--limit", "2"])) == 0
+    assert (
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--limit", "2"])) == 0
+    )
     out, err = capsys.readouterr()
     assert "Note: showing 2 of 5 assigned issues." in err
     assert "Note:" not in out  # stdout stays clean for piping
 
 
-def test_yours_no_truncation_note_when_complete(monkeypatch, capsys) -> None:
+def test_yours_no_truncation_note_when_complete(
+    monkeypatch, capsys, run_with_config
+) -> None:
     _stub_yours(monkeypatch, issues=[_issue(1), _issue(2)], total=2)
-    assert issues_cli.run(cli.parse_args(["issues", "--limit", "2"])) == 0
+    assert (
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--limit", "2"])) == 0
+    )
     assert "Note:" not in capsys.readouterr().err
 
 
@@ -459,32 +557,39 @@ def _stub_sprint(
     )
 
 
-def test_sprint_flow_never_calls_current_login(monkeypatch, capsys) -> None:
+def test_sprint_flow_never_calls_current_login(
+    monkeypatch, capsys, run_with_config
+) -> None:
     _stub_sprint(monkeypatch, viewer="me")
-    assert issues_cli.run(cli.parse_args(["issues", "--sprint"])) == 0
+    assert run_with_config(issues_cli.run, cli.parse_args(["issues", "--sprint"])) == 0
     assert "No active sprint" in capsys.readouterr().out
 
 
-def test_sprint_viewer_missing_raises_login_error(monkeypatch) -> None:
+def test_sprint_viewer_missing_raises_login_error(monkeypatch, run_with_config) -> None:
     _stub_sprint(monkeypatch, viewer=None)
     with pytest.raises(PlateError) as excinfo:
-        issues_cli.run(cli.parse_args(["issues", "--sprint"]))
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--sprint"]))
     assert "Could not determine your GitHub login" in str(excinfo.value)
 
 
-def test_sprint_without_configured_board_raises_naming_config(monkeypatch) -> None:
+def test_sprint_without_configured_board_raises_naming_config(
+    monkeypatch, run_with_config
+) -> None:
     monkeypatch.setattr(config, "load_config", lambda *a, **k: config.Config())
     monkeypatch.setattr(gh, "current_repo", lambda: "an-org/a-repo")
     with pytest.raises(PlateError) as excinfo:
-        issues_cli.run(
-            cli.parse_args(["issues", "--sprint", "--config", "/tmp/plate.json"])
+        run_with_config(
+            issues_cli.run,
+            cli.parse_args(["issues", "--sprint", "--config", "/tmp/plate.json"]),
         )
     message = str(excinfo.value)
     assert "No sprint board configured for an-org/a-repo" in message
     assert "/tmp/plate.json" in message
 
 
-def test_sprint_empty_with_title_names_the_sprint(monkeypatch, capsys) -> None:
+def test_sprint_empty_with_title_names_the_sprint(
+    monkeypatch, capsys, run_with_config
+) -> None:
     # An active iteration whose only items belong to another repo: the sprint
     # exists but has nothing to show here — distinct from "no active sprint".
     _stub_sprint(
@@ -492,23 +597,26 @@ def test_sprint_empty_with_title_names_the_sprint(monkeypatch, capsys) -> None:
         viewer="me",
         items=[_sprint_item(1, repo="an-org/other-repo")],
     )
-    assert issues_cli.run(cli.parse_args(["issues", "--sprint"])) == 0
+    assert run_with_config(issues_cli.run, cli.parse_args(["issues", "--sprint"])) == 0
     out = capsys.readouterr().out
     assert "No issues in the current sprint (Sprint 7) for an-org/a-repo." in out
 
 
-def test_sprint_renders_table_with_items(monkeypatch, capsys) -> None:
+def test_sprint_renders_table_with_items(monkeypatch, capsys, run_with_config) -> None:
     _stub_sprint(monkeypatch, viewer="me", items=[_sprint_item(1)])
-    assert issues_cli.run(cli.parse_args(["issues", "--sprint"])) == 0
+    assert run_with_config(issues_cli.run, cli.parse_args(["issues", "--sprint"])) == 0
     out = capsys.readouterr().out
     assert "Sprint 7" in out
     assert "Item 1" in out
 
 
-def test_sprint_markdown_format(monkeypatch, capsys) -> None:
+def test_sprint_markdown_format(monkeypatch, capsys, run_with_config) -> None:
     _stub_sprint(monkeypatch, viewer="me", items=[_sprint_item(1)])
     assert (
-        issues_cli.run(cli.parse_args(["issues", "--sprint", "--format", "markdown"]))
+        run_with_config(
+            issues_cli.run,
+            cli.parse_args(["issues", "--sprint", "--format", "markdown"]),
+        )
         == 0
     )
     out = capsys.readouterr().out
@@ -516,9 +624,16 @@ def test_sprint_markdown_format(monkeypatch, capsys) -> None:
     assert "[#1](https://github.com/an-org/a-repo/issues/1)" in out
 
 
-def test_sprint_show_key_prints_sprint_key(monkeypatch, capsys) -> None:
+def test_sprint_show_key_prints_sprint_key(
+    monkeypatch, capsys, run_with_config
+) -> None:
     _stub_sprint(monkeypatch, viewer="me", items=[_sprint_item(1)])
-    assert issues_cli.run(cli.parse_args(["issues", "--sprint", "--show-key"])) == 0
+    assert (
+        run_with_config(
+            issues_cli.run, cli.parse_args(["issues", "--sprint", "--show-key"])
+        )
+        == 0
+    )
     out = capsys.readouterr().out
     assert "Key" in out
     assert "someone else's / unassigned row" in out
@@ -563,7 +678,7 @@ def test_main_survives_cp1252_stdout_and_stderr(monkeypatch) -> None:
     monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(out_raw, encoding="cp1252"))
     monkeypatch.setattr(sys, "stderr", io.TextIOWrapper(err_raw, encoding="cp1252"))
 
-    def glyphs(args: Any) -> int:
+    def glyphs(args: Any, cfg: Any) -> int:
         print("✓ 🚀")
         print("⚠", file=sys.stderr)
         return 0
@@ -577,7 +692,7 @@ def test_main_survives_cp1252_stdout_and_stderr(monkeypatch) -> None:
 
 
 def _install_command(monkeypatch, exc: BaseException) -> None:
-    def boom(args: Any) -> int:
+    def boom(args: Any, cfg: Any) -> int:
         raise exc
 
     monkeypatch.setitem(cli._COMMANDS, "issues", boom)
@@ -605,7 +720,7 @@ def test_broken_pipe_is_silent_end_to_end() -> None:
 
     code = (
         "import sys; from plate import cli\n"
-        "def spew(a):\n"
+        "def spew(a, cfg):\n"
         "    for _ in range(20000): print('x' * 100)\n"
         "    return 0\n"
         "cli._COMMANDS['issues'] = spew\n"

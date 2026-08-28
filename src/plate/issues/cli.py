@@ -4,8 +4,8 @@ you, across an owner's repositories, or a repo's current sprint board.
 Thin wiring layer: parse the ``issues`` flags, ask :mod:`plate.issues.github`
 for data, hand it to :mod:`plate.issues.model` to normalize and
 :mod:`plate.issues.render` to format. Shared I/O (repo/owner-type
-resolution) comes from :mod:`plate.core.gh`; the JSON config from
-:mod:`plate.core.config`. All environment failures arrive as
+resolution) comes from :mod:`plate.core.gh`; the JSON config arrives already
+loaded from :func:`plate.cli.main`. All environment failures arrive as
 :class:`~plate.core.gh.PlateError`; :func:`plate.cli.main` turns them into a
 clean stderr message with a non-zero exit.
 
@@ -19,7 +19,7 @@ import argparse
 import sys
 from datetime import UTC, datetime
 
-from plate.core import config, gh, owner
+from plate.core import config, flags, gh, owner
 from plate.core.gh import PlateError
 from plate.core.render import color_enabled
 
@@ -60,20 +60,6 @@ def _add_issues_flags(parser: argparse.ArgumentParser) -> None:
         help=f"Maximum issues to fetch. Defaults to {DEFAULT_LIMIT}.",
     )
     parser.add_argument(
-        "--format",
-        choices=("terminal", "markdown"),
-        default="terminal",
-        help="Output format. Defaults to terminal.",
-    )
-    parser.add_argument(
-        "--color",
-        choices=("auto", "always", "never"),
-        default="auto",
-        help="Colour terminal output. Defaults to auto, which honours NO_COLOR "
-        "and FORCE_COLOR, skips colour under TERM=dumb, and otherwise colours "
-        "only a terminal.",
-    )
-    parser.add_argument(
         "--stale-days",
         type=_positive_int,
         default=DEFAULT_STALE_DAYS,
@@ -93,16 +79,6 @@ def _add_issues_flags(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Print a key explaining the symbols above the table.",
     )
-    parser.add_argument(
-        "--config",
-        help="Path to a JSON config file. Defaults to $PLATE_CONFIG or "
-        "~/.config/plate/config.json.",
-    )
-    parser.add_argument(
-        "--config-path",
-        action="store_true",
-        help="Print the resolved config file location and exit.",
-    )
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -113,6 +89,7 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "across every repository of an owner with --owner.",
         description="Status table for open GitHub issues assigned to you, or "
         "across every repository of an owner with --owner.",
+        parents=[flags.output(), flags.config()],
     )
     _add_issues_flags(issues)
 
@@ -132,11 +109,7 @@ def _require_login(viewer: str | None) -> str:
     return viewer
 
 
-def run(args: argparse.Namespace) -> int:
-    if args.config_path:
-        print(args.config or config.config_path())
-        return 0
-
+def run(args: argparse.Namespace, cfg: config.Config) -> int:
     if args.mine and not args.owner:
         raise PlateError(
             "--mine only applies with --owner. The default view already shows "
@@ -147,8 +120,6 @@ def run(args: argparse.Namespace) -> int:
             "--sprint is per-repo and cannot be combined with --owner. Run "
             "--sprint on the current repo (or with --repo OWNER/REPO)."
         )
-
-    cfg = config.load_config(args.config)
 
     if args.owner:
         # The owner view is not tied to a checkout, so it must not require a git

@@ -452,10 +452,11 @@ A recognised label is pulled to the front of the Labels cell and shown bright:
 Matching is case-insensitive and supports `*` globs for prefixed schemes. Your
 file merges over the built-in default, so you only list what you want to change.
 
-`plate issues` reads this file on every view; `plate prs` reads it only to
-resolve `--owner` aliases. Both take `--config PATH` to point at another file
-and `--config-path` to print the location they resolved; `plate retro` has no
-config-driven behaviour and reads no config.
+`plate issues` and `plate prs` both read this file on every view — `prs` uses
+it only to resolve `--owner` aliases, but a broken file is reported either way.
+Both take `--config PATH` to point at another file and `--config-path` to print
+the location they resolved; `plate retro` has no config-driven behaviour, so it
+takes neither flag and reads no config.
 
 ## Development
 
