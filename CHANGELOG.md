@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/SimAin/gh-plate/compare/v1.7.0...v1.7.1) (2026-08-28)
+
+
+### Bug Fixes
+
+* **retro:** recover commits the feed dropped; skip GitHub-made squash commits ([#113](https://github.com/SimAin/gh-plate/issues/113)) ([cc94d80](https://github.com/SimAin/gh-plate/commit/cc94d80c6267845cda64b76ab22f84247f4d5a18))
+
 ## [1.7.0](https://github.com/SimAin/gh-plate/compare/v1.6.1...v1.7.0) (2026-08-27)
 
 
