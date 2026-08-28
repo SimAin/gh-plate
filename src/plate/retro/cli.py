@@ -20,8 +20,9 @@ from .model import (
     DEFAULT_DAYS,
     MAX_DAYS,
     MIN_DAYS,
+    api_timestamp,
     build_sections,
-    commits_from_compares,
+    collect_commits,
     coverage_note,
     push_groups,
     truncation_note,
@@ -72,16 +73,18 @@ def run(args: argparse.Namespace, _cfg: config.Config) -> int:
         )
 
     now = datetime.now(UTC)
-    since_date = window_start(args.days, now).date().isoformat()
-    # The retro is the slowest view — a couple of dozen sequential calls — so
-    # the fetches paint a stderr status line; clear it before anything prints.
+    start = window_start(args.days, now)
+    since_date = start.date().isoformat()
+    # The retro is the slowest view — a couple of dozen calls — so the
+    # fetches paint a stderr status line; clear it before anything prints.
     try:
         events = github.fetch_events(login)
         groups = push_groups(events, args.days, now)
-        compares = github.fetch_compares(
-            [(group.repo, group.base, group.head) for group in groups]
+        compares = github.fetch_compares([group.compare_range for group in groups])
+        listings = github.fetch_branch_commits(
+            [group.listing_target for group in groups], login, api_timestamp(start)
         )
-        commit_refs, unexpanded = commits_from_compares(groups, compares, login)
+        commit_refs, unexpanded = collect_commits(groups, compares, listings, login)
         opened_items, opened_total = github.fetch_opened(login, since_date)
         closed_items, closed_total = github.fetch_closed(login, since_date)
     finally:

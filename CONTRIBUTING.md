@@ -85,8 +85,8 @@ a domain package back.
 | `plate/prs/github.py` | PR-domain GraphQL fetches (`fetch_prs_and_viewer`, `fetch_owner_prs`) + `gh api graphql --paginate` pagination, built on `plate.core.gh`. |
 | `plate/prs/render.py` | PR-domain presentation: `terminal_table`/`markdown_table`, `owner_table`/`owner_markdown`, `summary_line`, `symbol_key`/`owner_key`, built on `plate.core.render`. |
 | `plate/prs/cli.py` | The `prs` subcommand: flags, and `run()`/`_run_repo`/`_run_owner` dispatch (`--owner` selects the owner-wide view). |
-| `plate/retro/model.py` | Pure domain: push events → one compare range per branch (`push_groups`), compare expansion → your commit refs, the per-owner channel sections and window arithmetic, plus the honesty notes. |
-| `plate/retro/github.py` | Retro-domain REST fetches (events feed, PR search, compare API), built on `plate.core.gh`. |
+| `plate/retro/model.py` | Pure domain: push and branch-creation events → one group per branch (`push_groups`), compare payloads ∪ branch listings → your commit refs (`collect_commits`), the per-owner channel sections and window arithmetic, plus the honesty notes. |
+| `plate/retro/github.py` | Retro-domain REST fetches (events feed, PR search, compare API, per-branch commit listing), built on `plate.core.gh`. |
 | `plate/retro/render.py` | Retro-domain presentation: the per-owner day grid (`panel`) and its markdown table. |
 | `plate/retro/cli.py` | The `retro` subcommand: flags and `run()`. |
 

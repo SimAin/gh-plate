@@ -303,10 +303,11 @@ something's stuck there."*
 
 Each channel reads the best source that can see private activity — reviews
 from your own events feed, PRs opened and closed from search, and **commits
-from your push events expanded through the compare API**, so branch work
-counts with its real magnitude on the day it happened, not the day it
-merged. It needs
-no checkout and runs from anywhere `gh` is authenticated.
+from your push events expanded through the compare API, plus a listing of
+each branch you touched** (the feed carries no push for a branch's creation
+and drops some ordinary pushes), so branch work counts with its real
+magnitude on the day it happened, not the day it merged. It needs no
+checkout and runs from anywhere `gh` is authenticated.
 
 Honesty notes when a source hits its limits: GitHub keeps only your 300 most
 recent events (review/commit counts for early days may be undercounted), a

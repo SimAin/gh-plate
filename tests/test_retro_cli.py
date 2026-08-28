@@ -171,6 +171,88 @@ def test_fetch_compares_empty_ranges_make_no_calls(monkeypatch) -> None:
 
     monkeypatch.setattr(gh, "run_command", boom)
     assert github.fetch_compares([]) == []
+    assert github.fetch_compares([None]) == [None]  # a created-only branch
+
+
+def test_fetch_compares_skip_none_ranges_keeping_alignment(monkeypatch) -> None:
+    fake_run, paths = _paged_run([compare_payload()])
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    compares = github.fetch_compares([None, ("acme/widget", "a" * 8, "b" * 8)])
+    assert compares[0] is None
+    assert compares[1] is not None
+    assert paths == ["repos/acme/widget/compare/aaaaaaaa...bbbbbbbb"]
+
+
+def test_fetch_branch_commits_lists_your_commits_since_the_window(monkeypatch) -> None:
+    listing = [{"sha": "c" * 8, "author": {"login": "simon"}}]
+    fake_run, paths = _paged_run([json.dumps(listing)])
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    listings = github.fetch_branch_commits(
+        [("acme/widget", "feat/x")], "simon", "2026-06-06T00:00:00Z"
+    )
+    assert listings == [listing]
+    assert paths == [
+        "repos/acme/widget/commits?sha=feat%2Fx&author=simon"
+        "&since=2026-06-06T00:00:00Z&per_page=100&page=1"
+    ]
+
+
+def test_fetch_branch_commits_walks_full_pages(monkeypatch) -> None:
+    full = [{"sha": str(n)} for n in range(github.COMMITS_PER_PAGE)]
+    fake_run, paths = _paged_run([json.dumps(full), json.dumps(full[:1])])
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    (listing,) = github.fetch_branch_commits(
+        [("acme/widget", "main")], "simon", "2026-06-06T00:00:00Z"
+    )
+    assert listing is not None and len(listing) == github.COMMITS_PER_PAGE + 1
+    assert [path[-6:] for path in paths] == ["page=1", "page=2"]
+
+
+def test_fetch_branch_commits_keep_earlier_pages_when_a_later_one_fails(
+    monkeypatch,
+) -> None:
+    full = [{"sha": str(n)} for n in range(github.COMMITS_PER_PAGE)]
+
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        if args[-1].endswith("page=1"):
+            return subprocess.CompletedProcess(
+                args, 0, stdout=json.dumps(full), stderr=""
+            )
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="gh: HTTP 404")
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    (listing,) = github.fetch_branch_commits(
+        [("acme/widget", "main")], "simon", "2026-06-06T00:00:00Z"
+    )
+    assert listing == full  # page 2 lost, page 1 kept; not a None fallback
+
+
+def test_fetch_branch_commits_align_around_a_none_in_the_middle(monkeypatch) -> None:
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        repo = args[-1].split("/")[1]
+        return subprocess.CompletedProcess(
+            args, 0, stdout=json.dumps([{"sha": repo}]), stderr=""
+        )
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    listings = github.fetch_branch_commits(
+        [("acme/a", "main"), None, ("acme/b", "main")], "simon", "2026-06-06T00:00:00Z"
+    )
+    assert listings == [[{"sha": "acme"}], None, [{"sha": "acme"}]]
+
+
+def test_fetch_branch_commits_none_for_missing_branches_and_non_branches(
+    monkeypatch,
+) -> None:
+    def fake_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        assert "acme/gone" in args[-1]  # the None entry makes no request
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="404")
+
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    listings = github.fetch_branch_commits(
+        [("acme/gone", "feat/merged"), None], "simon", "2026-06-06T00:00:00Z"
+    )
+    assert listings == [None, None]
 
 
 def test_fetch_gh_failure_raises(monkeypatch) -> None:
@@ -329,6 +411,17 @@ def test_fetch_compares_paints_branch_progress_on_a_tty(monkeypatch) -> None:
     assert "Expanding pushes on 2 branches…" in stderr.getvalue()
 
 
+def test_fetch_branch_commits_paints_progress_for_real_jobs_only(monkeypatch) -> None:
+    fake_run, _ = _paged_run([json.dumps([])])
+    monkeypatch.setattr(gh, "run_command", fake_run)
+    stderr = _TtyStderr()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    github.fetch_branch_commits(
+        [("acme/widget", "feat/x"), None], "simon", "2026-06-06T00:00:00Z"
+    )
+    assert "Listing commits on 1 branch…" in stderr.getvalue()
+
+
 def test_fetch_is_silent_when_stderr_is_not_a_tty(monkeypatch) -> None:
     stderr = io.StringIO()  # isatty() is False
     monkeypatch.setattr(sys, "stderr", stderr)
@@ -405,6 +498,7 @@ def _stub(
     *,
     events: list[dict[str, Any]] | None = None,
     compares: list[dict[str, Any] | None] | None = None,
+    listings: list[list[dict[str, Any]] | None] | None = None,
     prs: tuple[list[dict[str, Any]], int] = ([], 0),
     closed_prs: tuple[list[dict[str, Any]], int] = ([], 0),
     login: str | None = "simon",
@@ -415,12 +509,20 @@ def _stub(
     monkeypatch.setattr(github, "fetch_closed", lambda lg, since: closed_prs)
 
     def fake_compares(
-        ranges: list[tuple[str, str, str]],
+        ranges: list[tuple[str, str, str] | None],
     ) -> list[dict[str, Any] | None]:
         calls["ranges"] = ranges
         return compares if compares is not None else [None] * len(ranges)
 
     monkeypatch.setattr(github, "fetch_compares", fake_compares)
+
+    def fake_listings(
+        branches: list[tuple[str, str] | None], fetch_login: str, since: str
+    ) -> list[list[dict[str, Any]] | None]:
+        calls.update(branches=branches, listing_since=since)
+        return listings if listings is not None else [None] * len(branches)
+
+    monkeypatch.setattr(github, "fetch_branch_commits", fake_listings)
 
     def fake_opened(fetch_login: str, since: str) -> tuple[list[dict[str, Any]], int]:
         calls.update(login=fetch_login, since=since)
@@ -443,6 +545,28 @@ def test_run_renders_one_panel_per_owner(monkeypatch, capsys) -> None:
     assert calls["login"] == "simon"
     assert len(calls["since"]) == 10  # YYYY-MM-DD
     assert calls["ranges"] == [("acme/widget", "a" * 8, "b" * 8)]
+    assert calls["branches"] == [("acme/widget", "feat/x")]
+    assert calls["listing_since"].endswith("T00:00:00Z")  # midnight UTC, day one
+
+
+def test_run_counts_a_created_branch_from_its_listing(monkeypatch, capsys) -> None:
+    created = {
+        "type": "CreateEvent",
+        "repo": {"name": "acme/fresh"},
+        "created_at": _iso(),
+        "payload": {"ref": "main", "ref_type": "branch"},
+    }
+    calls = _stub(
+        monkeypatch,
+        events=[created],
+        listings=[json.loads(compare_payload())["commits"]],
+    )
+    assert cli.main(["retro", "--color", "never"]) == 0
+    out, err = capsys.readouterr()
+    assert "── acme · last 14 days " in out
+    assert "Note:" not in err
+    assert calls["ranges"] == [None]  # nothing to compare
+    assert calls["branches"] == [("acme/fresh", "main")]
 
 
 def test_retro_does_not_read_config(monkeypatch, capsys) -> None:

@@ -364,7 +364,25 @@ PRs opened from **issue search** (`is:pr author:LOGIN created:>=`), and
 commits from the feed's **push events expanded through the compare API** —
 one `base...head` range per (repo, branch) chain, fetched in parallel,
 keeping only commits the viewer authored, deduped by sha, bucketed by their
-real committer dates.
+real committer dates. **Amended (issue #112):** the feed is not a complete
+push log — a branch-creating push emits only a `CreateEvent`, and ordinary
+`PushEvent`s get dropped (4 of 15 merges to one `main` in a day) — so every
+(repo, branch) the feed saw pushed *or created* is also **listed directly**
+(`repos/{repo}/commits?sha=BRANCH&author=LOGIN&since=WINDOW_START`) and
+unioned with the compare by sha. The listing sees the creation push and
+anything after the last recorded push; the compare sees a branch deleted
+after merge. At least one extra request per branch, as a second parallel
+fan-out after the compares. The listing returns everything *reachable* from
+the branch tip, not just what you pushed — so your commits that landed there
+via someone else's merge now count, and so would every squash or rebase
+merge of yours reachable from any touched branch: a new sha on **merge day**,
+the day this channel is designed not to move on, duplicating work already
+counted on the branch and a landing the `closed` row already shows. So
+**commits GitHub committed for you are skipped** on both paths (committer
+`noreply@github.com` — squash, rebase and merge commits); the cost is that
+commits made in the github.com file editor share that committer and drop
+too. Still blind: a branch created, merged and deleted inside the window
+with no recorded push is zero unless its target branch is also in scope.
 
 **Why not the obvious sources — both probed live and rejected:**
 
@@ -393,8 +411,9 @@ automatically (it imports only `plate.core`; the compare fan-out uses a
 stdlib thread pool). Reviews and commits inherit the events feed's caps (300
 events / 90 days): when a capped feed can't reach the window's start, a
 stderr note says early days may be undercounted rather than passing them off
-as rest. A compare that can't resolve (rewritten history) falls back to one
-commit per push on the push's day — counted, and reported via its own note.
+as rest. A branch that can be neither compared (rewritten history) nor
+listed (deleted) falls back to one commit per push on the push's day —
+counted, and reported via its own note.
 Commits with an email not linked to the GitHub account don't match the
 author filter and are dropped; rebase-rewritten shas can count twice across
 branches. Day buckets are UTC.
