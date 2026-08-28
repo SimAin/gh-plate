@@ -659,3 +659,43 @@ def test_fetch_failure_surfaces_as_clean_exit(monkeypatch, capsys) -> None:
     monkeypatch.setattr(github, "fetch_events", fake_events)
     assert cli.main(["retro"]) == 1
     assert "activity" in capsys.readouterr().err
+
+
+# --- --format json ---------------------------------------------------------------
+
+
+def test_run_json_wraps_sections_and_notes_in_the_envelope(monkeypatch, capsys) -> None:
+    _stub(
+        monkeypatch,
+        events=[push_event()] + [review_event()] * github.EVENTS_FEED_CAP,
+        compares=[None],  # falls back: an unexpanded-push note
+        prs=([pr_item()], 1500),  # a truncation note
+    )
+    assert cli.main(["retro", "--format", "json"]) == 0
+    out, err = capsys.readouterr()
+    payload = json.loads(out)
+    assert payload["schema"] == 1
+    assert (payload["command"], payload["view"]) == ("retro", "retro")
+    assert payload["login"] == "user"
+    assert payload["repo"] is None and payload["stale_days"] is None
+    assert payload["data"]["days"] == retro_model.DEFAULT_DAYS
+    owners = [section["owner"] for section in payload["data"]["sections"]]
+    assert sorted(owners) == ["acme", "user"]  # most active owner first
+    section = next(s for s in payload["data"]["sections"] if s["owner"] == "acme")
+    assert [channel["label"] for channel in section["channels"]] == list(
+        retro_model.CHANNEL_ORDER
+    )
+    assert len(section["channels"][0]["counts"]) == retro_model.DEFAULT_DAYS
+    assert any("counting 1 of 1500" in note for note in payload["notes"])
+    assert any("could not be expanded" in note for note in payload["notes"])
+    assert any("most recent events" in note for note in payload["notes"])
+    assert err == ""  # notes travel in the envelope, never to stderr
+
+
+def test_run_json_with_no_activity_is_an_empty_envelope(monkeypatch, capsys) -> None:
+    _stub(monkeypatch)
+    assert cli.main(["retro", "--format", "json"]) == 0
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["data"] == {"days": retro_model.DEFAULT_DAYS, "sections": []}
+    assert "No activity" not in out

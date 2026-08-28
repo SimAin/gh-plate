@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from plate import cli
-from plate.core import config
+from plate.core import config, gh
 from plate.core.gh import PlateError
 from plate.prs import cli as prs_cli
 from plate.prs import github
@@ -606,3 +606,128 @@ def test_show_key_teaches_strip_with_timeline(monkeypatch, capsys) -> None:
         == 0
     )
     assert "Strip" in capsys.readouterr().out
+
+
+# --- --format json ---------------------------------------------------------------
+
+
+def test_json_repo_view_emits_summary_and_ordered_rows(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    monkeypatch.setattr(gh, "current_repo", lambda: "acme/widget")
+    calls = _stub_fetch(
+        monkeypatch,
+        prs=[_pr(1, "Theirs", author="alice"), _pr(2, "Mine", author="me")],
+        login="me",
+    )
+    args = cli.parse_args(["prs", "--format", "json", "--timeline"])
+    assert run_with_config(prs_cli.run, args) == 0
+    out, err = capsys.readouterr()
+    payload = json.loads(out)
+    assert (payload["command"], payload["view"]) == ("prs", "repo")
+    assert payload["repo"] == "acme/widget" and payload["login"] == "me"
+    assert payload["assignee"] is None and payload["sprint"] is None
+    assert payload["stale_days"] == prs_cli.DEFAULT_STALE_DAYS
+    assert payload["data"]["summary"]["open"] == 2
+    rows = payload["data"]["prs"]
+    assert [row["number"] for row in rows] == [2, 1]  # yours first, as the table
+    assert rows[0]["is_mine"] is True and rows[0]["title"] == "Mine"
+    assert calls["timeline"] is True  # the strip is data too, only markdown skips it
+    assert payload["notes"] == [] and err == ""
+
+
+def test_json_repo_view_carries_notes_instead_of_printing_them(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    monkeypatch.setattr(gh, "current_repo", lambda: "acme/widget")
+    _stub_fetch(monkeypatch, prs=[_pr(1)], login=None)
+    args = cli.parse_args(["prs", "--format", "json", "--limit", "1"])
+    assert run_with_config(prs_cli.run, args) == 0
+    out, err = capsys.readouterr()
+    notes = json.loads(out)["notes"]
+    assert any("fetched 1 open PRs" in note for note in notes)
+    assert any("login could not be determined" in note for note in notes)
+    assert err == ""
+
+
+def test_json_repo_view_with_no_prs_is_an_empty_envelope(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    monkeypatch.setattr(gh, "current_repo", lambda: "acme/widget")
+    _stub_fetch(monkeypatch, prs=[], login="me")
+    assert (
+        run_with_config(prs_cli.run, cli.parse_args(["prs", "--format", "json"])) == 0
+    )
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["data"]["prs"] == []
+    assert payload["data"]["summary"]["open"] == 0
+    assert "No open PRs" not in out
+
+
+def test_json_owner_view_lists_rows_in_section_order(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    prs = [
+        {**_pr(1), "repository": {"nameWithOwner": "acme/widget"}},
+        {**_pr(2), "repository": {"nameWithOwner": "acme/gadget"}},
+    ]
+    _stub_owner(monkeypatch, prs=prs, total=50)
+    args = cli.parse_args(
+        ["prs", "--owner", "acme", "--format", "json", "--limit", "2"]
+    )
+    assert run_with_config(prs_cli.run, args) == 0
+    out, err = capsys.readouterr()
+    payload = json.loads(out)
+    assert payload["view"] == "owner"
+    assert payload["owner"] == "acme" and payload["repo"] is None
+    assert sorted(row["repo"] for row in payload["data"]["prs"]) == [
+        "acme/gadget",
+        "acme/widget",
+    ]
+    assert len(payload["notes"]) == 1 and "2 of 50" in payload["notes"][0]
+    assert err == ""
+
+
+def test_json_repo_view_serialises_the_timeline_strip(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    from datetime import UTC, datetime
+
+    monkeypatch.setattr(gh, "current_repo", lambda: "acme/widget")
+    today = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    pr = {
+        **_pr(1, "Reviewed", author="alice"),
+        "timelineItems": {
+            "nodes": [
+                {
+                    "__typename": "PullRequestReview",
+                    "state": "APPROVED",
+                    "submittedAt": today,
+                    "author": {"login": "me", "__typename": "User"},
+                }
+            ]
+        },
+    }
+    _stub_fetch(monkeypatch, prs=[pr], login="me")
+    args = cli.parse_args(["prs", "--format", "json", "--timeline"])
+    assert run_with_config(prs_cli.run, args) == 0
+    (row,) = json.loads(capsys.readouterr().out)["data"]["prs"]
+    strip = row["timeline"]
+    assert len(strip) == 28
+    assert strip[-1] == {"kind": "review", "review_state": "APPROVED", "mine": True}
+    assert all(cell is None for cell in strip[:-1])
+
+
+def test_json_owner_view_with_mine_keeps_assignee_null(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    # --mine narrows PRs by author, not assignee, so the envelope's assignee
+    # filter stays null; the rows say is_mine.
+    calls = _stub_owner(monkeypatch, prs=[_owner_pr(1, author="me")], total=1)
+    args = cli.parse_args(["prs", "--owner", "acme", "--mine", "--format", "json"])
+    assert run_with_config(prs_cli.run, args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert calls["mine"] is True
+    assert payload["assignee"] is None
+    assert payload["data"]["prs"][0]["is_mine"] is True

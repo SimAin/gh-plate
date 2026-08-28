@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -713,3 +713,24 @@ def build_sprint_view(
         ),
         unassigned=sorted((r for r in rows if r.is_unassigned), key=sort_key),
     )
+
+
+# --- machine-readable projections ----------------------------------------------
+
+
+def flat_rows(forest: list[TreeNode]) -> list[dict[str, Any]]:
+    """The forest in display order as plain dicts, each row carrying its tree
+    ``depth`` — the shape ``--format json`` emits (``parent_number`` and
+    ``depth`` together rebuild the hierarchy; a flat list is what ``jq`` wants)."""
+    return [{**asdict(node.row), "depth": node.depth} for node in flatten(forest)]
+
+
+def sprint_rows(view: SprintView) -> list[dict[str, Any]]:
+    """The sprint's rows in display order as plain dicts, each carrying its
+    ``group`` (``yours`` / ``others`` / ``unassigned``)."""
+    buckets = (
+        ("yours", view.yours),
+        ("others", view.others),
+        ("unassigned", view.unassigned),
+    )
+    return [{**asdict(row), "group": group} for group, rows in buckets for row in rows]

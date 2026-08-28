@@ -69,18 +69,16 @@ def listing_truncation_note(
 
     ``noun`` names what was counted (``"open issues"``, ``"open PRs"``). Two
     causes, two remedies: the user's own ``--limit``, or GitHub's 1000-result
-    search ceiling. The leading blank line separates the note from the table
-    above it — callers print it to stderr as-is.
+    search ceiling.
     """
     if shown >= total:
         return None
     if shown == limit:
         return (
-            f"\nNote: showing {shown} of {total} {noun} for "
-            f"{display} (--limit {limit})."
+            f"Note: showing {shown} of {total} {noun} for {display} (--limit {limit})."
         )
     return (
-        "\nNote: GitHub search returns at most 1000 results per query; "
+        "Note: GitHub search returns at most 1000 results per query; "
         f"showing {shown} of {total} {noun} for {display}. "
         "Use --mine or --repo to narrow."
     )

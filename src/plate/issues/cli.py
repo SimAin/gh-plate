@@ -19,12 +19,20 @@ import argparse
 import sys
 from datetime import UTC, datetime
 
-from plate.core import config, flags, gh, owner
+from plate.core import config, flags, gh, jsonout, owner
 from plate.core.gh import PlateError
 from plate.core.render import color_enabled
 
 from . import github, render
-from .model import build_forest, build_index, build_sprint_view, group_by_repo
+from .model import (
+    TreeNode,
+    build_forest,
+    build_index,
+    build_sprint_view,
+    flat_rows,
+    group_by_repo,
+    sprint_rows,
+)
 
 DEFAULT_LIMIT = 500
 DEFAULT_STALE_DAYS = 14
@@ -134,15 +142,34 @@ def run(args: argparse.Namespace, cfg: config.Config) -> int:
 
 def _run_yours(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
     # assignee:@me filters server-side without a concrete login, and this view
-    # groups nothing by it, so the viewer riding along goes unused here.
-    issues, total, _viewer = github.fetch_assigned_issues(repo, args.limit)
+    # groups nothing by it; the viewer riding along only labels the JSON.
+    issues, total, viewer = github.fetch_assigned_issues(repo, args.limit)
+    now = datetime.now(UTC)
+    notes = []
+    if len(issues) == args.limit and total > args.limit:
+        notes.append(f"Note: showing {args.limit} of {total} assigned issues.")
+
+    if args.format == "json":
+        index = build_index(issues, now=now, stale_days=args.stale_days, repo=repo)
+        payload = jsonout.envelope(
+            command="issues",
+            view="assigned",
+            now=now,
+            login=viewer,
+            repo=repo,
+            assignee=viewer,
+            stale_days=args.stale_days,
+            notes=notes,
+            data={"issues": flat_rows(build_forest(index))},
+        )
+        print(jsonout.dumps(payload))
+        return 0
+
     if not issues:
         print(f"No open issues assigned to you in {repo}.")
         return 0
 
-    index = build_index(
-        issues, now=datetime.now(UTC), stale_days=args.stale_days, repo=repo
-    )
+    index = build_index(issues, now=now, stale_days=args.stale_days, repo=repo)
     forest = build_forest(index)
 
     if args.format == "markdown":
@@ -158,11 +185,8 @@ def _run_yours(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
             )
         )
 
-    if len(issues) == args.limit and total > args.limit:
-        print(
-            f"\nNote: showing {args.limit} of {total} assigned issues.",
-            file=sys.stderr,
-        )
+    for note in notes:
+        print(f"\n{note}", file=sys.stderr)
     return 0
 
 
@@ -176,6 +200,46 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
         args.limit,
         assignee="@me" if args.mine else None,
     )
+    now = datetime.now(UTC)
+    note = owner.listing_truncation_note(
+        "open issues", display, len(issues), total, args.limit
+    )
+    notes = [note] if note else []
+
+    def sections_of() -> list[tuple[str, list[TreeNode]]]:
+        # repo=target.name is only the fallback for a payload missing
+        # repository.nameWithOwner; the owner query always carries it, so
+        # this is inert here — it just keeps build_index's contract satisfied.
+        index = build_index(
+            issues,
+            now=now,
+            stale_days=args.stale_days,
+            repo=target.name,
+            login=_require_login(viewer),
+        )
+        return group_by_repo(index)
+
+    if args.format == "json":
+        # Nothing fetched needs no login, as the other formats agree.
+        rows = (
+            [row for _repo, forest in sections_of() for row in flat_rows(forest)]
+            if issues
+            else []
+        )
+        payload = jsonout.envelope(
+            command="issues",
+            view="owner",
+            now=now,
+            login=viewer,
+            owner=target.name,
+            assignee=viewer if args.mine else None,
+            stale_days=args.stale_days,
+            notes=notes,
+            data={"issues": rows},
+        )
+        print(jsonout.dumps(payload))
+        return 0
+
     if not issues:
         if args.mine:
             print(f"No open issues assigned to you for {display}.")
@@ -183,17 +247,7 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
             print(f"No open issues found for {display}.")
         return 0
 
-    # repo=target.name is only the fallback for a payload missing
-    # repository.nameWithOwner; the owner query always carries it, so this is
-    # inert here — it just keeps build_index's contract satisfied.
-    index = build_index(
-        issues,
-        now=datetime.now(UTC),
-        stale_days=args.stale_days,
-        repo=target.name,
-        login=_require_login(viewer),
-    )
-    sections = group_by_repo(index)
+    sections = sections_of()
 
     if args.format == "markdown":
         if target.alias_fired:
@@ -213,11 +267,8 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
             )
         )
 
-    note = owner.listing_truncation_note(
-        "open issues", display, len(issues), total, args.limit
-    )
-    if note:
-        print(note, file=sys.stderr)
+    for note in notes:
+        print(f"\n{note}", file=sys.stderr)
     return 0
 
 
@@ -249,14 +300,31 @@ def _run_sprint(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
         project.sprint_field,
         project.status_field,
     )
+    now = datetime.now(UTC)
+    login = _require_login(viewer)
     view = build_sprint_view(
         items,
-        login=_require_login(viewer),
+        login=login,
         repo=repo,
-        now=datetime.now(UTC),
+        now=now,
         stale_days=args.stale_days,
         status_order=project.status_order,
     )
+    if args.format == "json":
+        payload = jsonout.envelope(
+            command="issues",
+            view="sprint",
+            now=now,
+            login=login,
+            repo=repo,
+            sprint={"title": view.title},
+            stale_days=args.stale_days,
+            notes=[],
+            data={"issues": sprint_rows(view)},
+        )
+        print(jsonout.dumps(payload))
+        return 0
+
     if view.is_empty:
         if view.title is None:
             print(f"No active sprint for {repo}.")
