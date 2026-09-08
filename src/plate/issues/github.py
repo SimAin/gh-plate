@@ -46,9 +46,8 @@ from .model import normalize_status, strip_emoji
 # ``assignees(first: 10)`` is fetched on owned issues only, not on
 # ``NodeFields`` — context ancestors are pulled in for breadcrumbs, not for
 # who holds them, the same reasoning that already keeps ``labels``/PR refs
-# owned-only. Unused by today's view (which only ever shows "your" issues);
-# groundwork for the owner-wide view (issue #43), where an issue's assignees
-# are exactly the "who" a multi-repo table needs to render.
+# owned-only. The owner-wide view renders them; every view carries them in
+# ``IssueRow.assignees`` and so in ``--format json``.
 #
 # ``closedByPullRequestsReferences`` (with ``includeClosedPrs``) gives the
 # "fix in flight" signal — the PRs linked to an issue, with state + draft flag.

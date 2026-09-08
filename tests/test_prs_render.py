@@ -594,6 +594,19 @@ def test_owner_table_rows_keep_section_fetch_order() -> None:
     )
 
 
+def test_owner_table_shows_the_viewer_as_me_and_dims_them() -> None:
+    out = render.owner_table(owner_sections(), use_color=True, login="user")
+    mine_line = next(line for line in out.splitlines() if "Mine here" in line)
+    assert f"{DIM}me{RESET}" in mine_line
+    assert "user" not in out
+
+
+def test_owner_markdown_shows_the_viewer_as_me() -> None:
+    out = render.owner_markdown(owner_sections(), login="user")
+    assert "| Mine here | waiting | me |" in out
+    assert "user" not in out
+
+
 def test_owner_table_color_can_be_disabled() -> None:
     assert "\033[" not in render.owner_table(owner_sections(), use_color=False)
 

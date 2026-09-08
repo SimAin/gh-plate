@@ -476,11 +476,14 @@ present, null when it doesn't apply to the view:
   stderr with a non-zero exit; no JSON is printed then.
 - `data.issues` is a **flat list in display order**; each row carries `repo`,
   `parent_number` and `depth`, which together rebuild the tree, plus a `group`
-  (`yours` / `others` / `unassigned`) in the sprint view. In the assigned view
-  every row's `assignees` is `[]` — that query doesn't fetch them, since every
-  row is yours by construction; use the envelope's `assignee`. `data.prs` is the
-  rows in the table's order (yours, to review, the rest) with a `summary`
-  beside them. For `retro`, `data.days` is the window size and
+  (`yours` / `others` / `unassigned`) in the sprint view. A fetched row carries
+  its full `assignees` list; a `context: true` row is an ancestor pulled in
+  only to draw the tree (`mine` is false, `assignees` and `labels` are empty),
+  so filter on `context == false` when counting your work. `data.prs` is the
+  rows with a `summary` beside them: in the repo view in the table's order
+  (yours, to review, the rest); in the owner view grouped by repo, most
+  recently active first, in fetch order within each — the terminal owner
+  table's order. For `retro`, `data.days` is the window size and
   `data.sections` is one entry per owner with its channels (`counts` oldest
   → today).
 - An empty result is still an envelope with empty lists — check the exit code

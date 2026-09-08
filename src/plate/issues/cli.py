@@ -21,11 +21,10 @@ from datetime import UTC, datetime
 
 from plate.core import config, flags, gh, jsonout, owner
 from plate.core.gh import PlateError
-from plate.core.render import color_enabled
+from plate.core.render import color_enabled, print_notes
 
 from . import github, render
 from .model import (
-    TreeNode,
     build_forest,
     build_index,
     build_sprint_view,
@@ -149,9 +148,11 @@ def _run_yours(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
     if len(issues) == args.limit and total > args.limit:
         notes.append(f"Note: showing {args.limit} of {total} assigned issues.")
 
+    index = build_index(issues, now=now, stale_days=args.stale_days, repo=repo)
+    forest = build_forest(index)
+
     if args.format == "json":
-        index = build_index(issues, now=now, stale_days=args.stale_days, repo=repo)
-        payload = jsonout.envelope(
+        return jsonout.emit(
             command="issues",
             view="assigned",
             now=now,
@@ -160,17 +161,12 @@ def _run_yours(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
             assignee=viewer,
             stale_days=args.stale_days,
             notes=notes,
-            data={"issues": flat_rows(build_forest(index))},
+            data={"issues": flat_rows(forest)},
         )
-        print(jsonout.dumps(payload))
-        return 0
 
     if not issues:
         print(f"No open issues assigned to you in {repo}.")
         return 0
-
-    index = build_index(issues, now=now, stale_days=args.stale_days, repo=repo)
-    forest = build_forest(index)
 
     if args.format == "markdown":
         print(render.markdown_tree(forest, cfg.style_for))
@@ -185,8 +181,7 @@ def _run_yours(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
             )
         )
 
-    for note in notes:
-        print(f"\n{note}", file=sys.stderr)
+    print_notes(notes)
     return 0
 
 
@@ -206,28 +201,26 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
     )
     notes = [note] if note else []
 
-    def sections_of() -> list[tuple[str, list[TreeNode]]]:
-        # repo=target.name is only the fallback for a payload missing
-        # repository.nameWithOwner; the owner query always carries it, so
-        # this is inert here — it just keeps build_index's contract satisfied.
-        index = build_index(
-            issues,
-            now=now,
-            stale_days=args.stale_days,
-            repo=target.name,
-            login=_require_login(viewer),
+    # An empty result never needs the login (no rows to classify), in any
+    # format. repo=target.name is only the fallback for a payload missing
+    # repository.nameWithOwner; the owner query always carries it, so this is
+    # inert here — it just keeps build_index's contract satisfied.
+    sections = (
+        group_by_repo(
+            build_index(
+                issues,
+                now=now,
+                stale_days=args.stale_days,
+                repo=target.name,
+                login=_require_login(viewer),
+            )
         )
-        return group_by_repo(index)
+        if issues
+        else []
+    )
 
     if args.format == "json":
-        # An empty result never needed the login in the other formats; keep
-        # JSON no stricter.
-        rows = (
-            [row for _repo, forest in sections_of() for row in flat_rows(forest)]
-            if issues
-            else []
-        )
-        payload = jsonout.envelope(
+        return jsonout.emit(
             command="issues",
             view="owner",
             now=now,
@@ -236,10 +229,12 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
             assignee=viewer if args.mine else None,
             stale_days=args.stale_days,
             notes=notes,
-            data={"issues": rows},
+            data={
+                "issues": [
+                    row for _repo, forest in sections for row in flat_rows(forest)
+                ]
+            },
         )
-        print(jsonout.dumps(payload))
-        return 0
 
     if not issues:
         if args.mine:
@@ -247,8 +242,6 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
         else:
             print(f"No open issues found for {display}.")
         return 0
-
-    sections = sections_of()
 
     if args.format == "markdown":
         if target.alias_fired:
@@ -268,8 +261,7 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
             )
         )
 
-    for note in notes:
-        print(f"\n{note}", file=sys.stderr)
+    print_notes(notes)
     return 0
 
 
@@ -312,7 +304,7 @@ def _run_sprint(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
         status_order=project.status_order,
     )
     if args.format == "json":
-        payload = jsonout.envelope(
+        return jsonout.emit(
             command="issues",
             view="sprint",
             now=now,
@@ -323,8 +315,6 @@ def _run_sprint(args: argparse.Namespace, cfg: config.Config, repo: str) -> int:
             notes=[],
             data={"issues": sprint_rows(view)},
         )
-        print(jsonout.dumps(payload))
-        return 0
 
     if view.is_empty:
         if view.title is None:

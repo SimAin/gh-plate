@@ -72,3 +72,40 @@ def envelope(
 def dumps(payload: dict[str, Any]) -> str:
     """The envelope as indented UTF-8 JSON (glyphs kept, not escaped)."""
     return json.dumps(payload, indent=2, ensure_ascii=False)
+
+
+def emit(
+    *,
+    command: str,
+    view: str,
+    now: datetime,
+    login: str | None,
+    data: Any,
+    notes: list[str],
+    repo: str | None = None,
+    owner: str | None = None,
+    assignee: str | None = None,
+    sprint: dict[str, Any] | None = None,
+    stale_days: int | None = None,
+) -> int:
+    """Print one view's envelope to stdout and return the exit code (0) — the
+    whole ``--format json`` tail of a ``run()``, so every view ends the same
+    way. Same keywords as :func:`envelope`."""
+    print(
+        dumps(
+            envelope(
+                command=command,
+                view=view,
+                now=now,
+                login=login,
+                data=data,
+                notes=notes,
+                repo=repo,
+                owner=owner,
+                assignee=assignee,
+                sprint=sprint,
+                stale_days=stale_days,
+            )
+        )
+    )
+    return 0

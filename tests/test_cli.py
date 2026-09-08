@@ -817,7 +817,34 @@ def test_json_yours_view_emits_flat_rows_with_depth(
     assert [(row["number"], row["depth"]) for row in rows] == [(1, 0), (2, 1)]
     assert rows[1]["parent_number"] == 1
     assert rows[0]["title"] == "Issue 1" and rows[0]["is_stale"] is False
+    assert rows[0]["assignees"] == ["me"]  # the query fetches them; kept raw
     assert payload["notes"] == [] and err == ""
+
+
+def test_json_yours_view_marks_a_context_ancestor(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    # A parent you don't own is pulled in to draw the tree: context, not
+    # yours, and with no assignees fetched — a consumer filters on `context`.
+    child = {
+        **_issue(2),
+        "parent": {
+            "number": 9,
+            "title": "Someone's epic",
+            "url": "https://github.com/an-org/repo-a/issues/9",
+            "repository": {"nameWithOwner": "an-org/repo-a"},
+        },
+    }
+    _stub_yours(monkeypatch, issues=[child], total=1)
+    assert (
+        run_with_config(issues_cli.run, cli.parse_args(["issues", "--format", "json"]))
+        == 0
+    )
+    rows = json.loads(capsys.readouterr().out)["data"]["issues"]
+    by_number = {row["number"]: row for row in rows}
+    assert by_number[9]["context"] is True and by_number[9]["mine"] is False
+    assert by_number[9]["assignees"] == []
+    assert by_number[2]["context"] is False and by_number[2]["assignees"] == ["me"]
 
 
 def test_json_yours_view_moves_the_truncation_note_into_the_envelope(

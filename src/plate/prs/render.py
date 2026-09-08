@@ -40,9 +40,9 @@ from .model import (
     DayEvent,
     PrRow,
     PrSummary,
+    display_order,
     pr_state,
     sort_group,
-    sort_key,
     your_move,
 )
 
@@ -292,7 +292,7 @@ def terminal_table(
 
     group_sizes = {g: sum(1 for r in rows if sort_group(r) == g) for g in (0, 1, 2)}
     previous_group: int | None = None
-    for row in sorted(rows, key=sort_key):
+    for row in display_order(rows):
         group = sort_group(row)
         if group != previous_group:
             label = f"{GROUP_LABELS[group]} ({group_sizes[group]})"
@@ -474,7 +474,7 @@ def markdown_table(rows: list[PrRow], login: str | None = None) -> str:
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
 
-    for row in sorted(rows, key=sort_key):
+    for row in display_order(rows):
         pr_id = f"[#{row.number}]({row.url})" if row.url else f"#{row.number}"
         title = escape_markdown_cell(row.title)
         assignees = escape_markdown_cell(_display_assignees_plain(row, login))

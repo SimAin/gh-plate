@@ -139,6 +139,13 @@ def terminal_width() -> int:
     return shutil.get_terminal_size(fallback=(120, 24)).columns
 
 
+def print_notes(notes: list[str]) -> None:
+    """Print each honesty note to stderr after a blank line — the terminal and
+    markdown formats' tail (``--format json`` carries them in the envelope)."""
+    for note in notes:
+        print(f"\n{note}", file=sys.stderr)
+
+
 def color_enabled(mode: str) -> bool:
     """Resolve a --color mode. An explicit always/never wins; under auto,
     NO_COLOR (non-empty) disables, then FORCE_COLOR decides (``0``/``false``

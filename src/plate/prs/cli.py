@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 
 from plate.core import config, flags, gh, jsonout, owner
 from plate.core.gh import PlateError
-from plate.core.render import color_enabled
+from plate.core.render import color_enabled, print_notes
 
 from . import github, render
 from .model import display_order, group_by_repo, normalize_rows, summary_counts
@@ -139,7 +139,7 @@ def _run_repo(args: argparse.Namespace, repo: str) -> int:
     rows = normalize_rows(prs, login, now=now, stale_days=args.stale_days, repo=repo)
 
     if args.format == "json":
-        payload = jsonout.envelope(
+        return jsonout.emit(
             command="prs",
             view="repo",
             now=now,
@@ -149,8 +149,6 @@ def _run_repo(args: argparse.Namespace, repo: str) -> int:
             notes=notes,
             data={"summary": summary_counts(rows), "prs": display_order(rows)},
         )
-        print(jsonout.dumps(payload))
-        return 0
 
     if not prs:
         print(f"No open PRs found for {repo}.")
@@ -177,8 +175,7 @@ def _run_repo(args: argparse.Namespace, repo: str) -> int:
             )
         )
 
-    for note in notes:
-        print(f"\n{note}", file=sys.stderr)
+    print_notes(notes)
     return 0
 
 
@@ -206,7 +203,7 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
     sections = group_by_repo(rows)
 
     if args.format == "json":
-        payload = jsonout.envelope(
+        return jsonout.emit(
             command="prs",
             view="owner",
             now=now,
@@ -219,8 +216,6 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
                 "prs": [row for _repo, repo_rows in sections for row in repo_rows],
             },
         )
-        print(jsonout.dumps(payload))
-        return 0
 
     if not prs:
         if args.mine:
@@ -249,6 +244,5 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
             )
         )
 
-    for note in notes:
-        print(f"\n{note}", file=sys.stderr)
+    print_notes(notes)
     return 0

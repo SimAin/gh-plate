@@ -691,21 +691,25 @@ def test_json_owner_view_lists_rows_in_section_order(
     prs = [
         {**_pr(1), "repository": {"nameWithOwner": "acme/widget"}},
         {**_pr(2), "repository": {"nameWithOwner": "acme/gadget"}},
+        {**_pr(3), "repository": {"nameWithOwner": "acme/widget"}},
     ]
     _stub_owner(monkeypatch, prs=prs, total=50)
     args = cli.parse_args(
-        ["prs", "--owner", "acme", "--format", "json", "--limit", "2"]
+        ["prs", "--owner", "acme", "--format", "json", "--limit", "3"]
     )
     assert run_with_config(prs_cli.run, args) == 0
     out, err = capsys.readouterr()
     payload = json.loads(out)
     assert payload["view"] == "owner"
     assert payload["owner"] == "acme" and payload["repo"] is None
-    assert sorted(row["repo"] for row in payload["data"]["prs"]) == [
-        "acme/gadget",
-        "acme/widget",
+    # Grouped by repo (first seen first), fetch order within — the owner
+    # table's order, not the repo view's yours/to-review/rest sort.
+    assert [(row["repo"], row["number"]) for row in payload["data"]["prs"]] == [
+        ("acme/widget", 1),
+        ("acme/widget", 3),
+        ("acme/gadget", 2),
     ]
-    assert len(payload["notes"]) == 1 and "2 of 50" in payload["notes"][0]
+    assert len(payload["notes"]) == 1 and "3 of 50" in payload["notes"][0]
     assert err == ""
 
 

@@ -32,10 +32,11 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from plate.core.jsonout import plain
 from plate.core.text import compact_text, parse_timestamp
 
 # ``(repo, number)`` — the only identity that is unique across repos. An issue
@@ -83,10 +84,9 @@ class IssueRow:
 
     ``repo`` (``OWNER/REPO``) is what makes ``(repo, number)`` — see
     :data:`IssueKey` — a safe index key across repos; ``number`` alone is not.
-    ``assignees`` is the issue's assignee logins; it is ``[]`` when the query
-    that produced this row didn't fetch assignees (true of the yours-view
-    query today — it doesn't need them, since every owned issue is assigned to
-    you by construction) or when the issue genuinely has none.
+    ``assignees`` is the issue's assignee logins as fetched; it is ``[]`` for
+    a context ancestor (the queries don't fetch them there) or when the issue
+    genuinely has none.
     """
 
     repo: str
@@ -722,7 +722,7 @@ def flat_rows(forest: list[TreeNode]) -> list[dict[str, Any]]:
     """The forest in display order as plain dicts, each row carrying its tree
     ``depth`` — the shape ``--format json`` emits (``parent_number`` and
     ``depth`` together rebuild the hierarchy; a flat list is what ``jq`` wants)."""
-    return [{**asdict(node.row), "depth": node.depth} for node in flatten(forest)]
+    return [{**plain(node.row), "depth": node.depth} for node in flatten(forest)]
 
 
 def sprint_rows(view: SprintView) -> list[dict[str, Any]]:
@@ -733,4 +733,4 @@ def sprint_rows(view: SprintView) -> list[dict[str, Any]]:
         ("others", view.others),
         ("unassigned", view.unassigned),
     )
-    return [{**asdict(row), "group": group} for group, rows in buckets for row in rows]
+    return [{**plain(row), "group": group} for group, rows in buckets for row in rows]

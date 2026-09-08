@@ -8,12 +8,11 @@ repo and no checkout — it runs from anywhere ``gh`` is authenticated.
 from __future__ import annotations
 
 import argparse
-import sys
 from datetime import UTC, datetime
 
 from plate.core import config, flags, gh, jsonout
 from plate.core.gh import PlateError
-from plate.core.render import color_enabled
+from plate.core.render import color_enabled, print_notes
 
 from . import github, render
 from .model import (
@@ -104,7 +103,7 @@ def run(args: argparse.Namespace, _cfg: config.Config) -> int:
     ]
 
     if args.format == "json":
-        payload = jsonout.envelope(
+        return jsonout.emit(
             command="retro",
             view="retro",
             now=now,
@@ -112,8 +111,6 @@ def run(args: argparse.Namespace, _cfg: config.Config) -> int:
             notes=notes,
             data={"days": args.days, "sections": sections},
         )
-        print(jsonout.dumps(payload))
-        return 0
 
     if not sections:
         print(f"No activity found in the last {args.days} days.")
@@ -124,6 +121,5 @@ def run(args: argparse.Namespace, _cfg: config.Config) -> int:
     else:
         print(render.panel(sections, args.days, now, color_enabled(args.color)))
 
-    for note in notes:
-        print(f"\n{note}", file=sys.stderr)
+    print_notes(notes)
     return 0

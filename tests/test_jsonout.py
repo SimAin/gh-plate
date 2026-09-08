@@ -81,6 +81,22 @@ def test_envelope_plains_its_data_and_copies_notes() -> None:
     assert payload["assignee"] == "user" and payload["stale_days"] == 14
 
 
+def test_emit_prints_the_envelope_and_returns_zero(capsys) -> None:
+    code = jsonout.emit(
+        command="retro",
+        view="retro",
+        now=NOW,
+        login=None,
+        notes=["Note: one"],
+        data={"days": 7, "sections": [Leaf("x")]},
+    )
+    out, err = capsys.readouterr()
+    assert code == 0 and err == ""
+    payload = json.loads(out)
+    assert payload["command"] == "retro" and payload["notes"] == ["Note: one"]
+    assert payload["data"] == {"days": 7, "sections": [{"name": "x", "count": None}]}
+
+
 def test_dumps_is_indented_utf8_json() -> None:
     text = jsonout.dumps({"title": "naïve — ok", "n": 1})
     assert json.loads(text) == {"title": "naïve — ok", "n": 1}
