@@ -55,7 +55,8 @@ class DayEvent:
 class PrRow:
     """A single open PR, normalized for the PR views. Immutable by design.
 
-    ``assignees`` holds display-ready logins — your own login reads as ``me``.
+    ``assignees`` holds raw logins in the fetched order (the renderers show
+    your own as ``me``; the JSON output keeps the login).
     ``is_mine`` / ``is_to_review`` are the grouping flags (see
     :func:`row_flags`); ``original_index`` preserves the fetch order so the
     grouping sort stays stable within each group.
@@ -450,9 +451,6 @@ def normalize_rows(
     for index, pr in enumerate(prs):
         assignees = assignee_logins(pr)
         is_mine, is_to_review = row_flags(pr, assignees, current_login)
-        # Store display-ready names: your own login reads as "me" wherever it
-        # appears in the assignee list.
-        assignees = ["me" if login == current_login else login for login in assignees]
         channel_days, last_days, last_login, is_fallback = last_human_activity(pr, now)
         # Viewer-relative; unknown actor or unknown viewer claims nothing.
         last_mine: bool | None = None

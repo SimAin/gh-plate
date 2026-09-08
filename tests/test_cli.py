@@ -333,6 +333,7 @@ def test_owner_truncation_note_limit_hit(monkeypatch, capsys, run_with_config) -
         == 0
     )
     err = capsys.readouterr().err
+    assert err.startswith("\nNote: ")  # blank line, then the note
     assert "showing 2 of 5 open issues for an-org (--limit 2)." in err
 
 

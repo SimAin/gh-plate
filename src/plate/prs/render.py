@@ -177,18 +177,22 @@ def _format_comments(count: int) -> str:
     return "99+" if count > 99 else str(count)
 
 
-def _display_assignees_plain(row: PrRow) -> str:
-    """The Assignee cell as plain text (markdown, and the terminal's basis)."""
+def _display_assignees_plain(row: PrRow, login: str | None) -> str:
+    """The Assignee cell as plain text (markdown, and the terminal's basis).
+
+    ``login`` is the viewer; their own login reads as ``me``. The model keeps
+    raw logins so the JSON output stays filterable by login.
+    """
     if row.is_release_pr:
         return "Release PR"
     if row.bot_name:
         return row.bot_name
     if row.assignees:
-        return ", ".join(row.assignees)
+        return ", ".join("me" if a == login else a for a in row.assignees)
     return ""
 
 
-def _assignee_cell(row: PrRow, width: int, use_color: bool) -> str:
+def _assignee_cell(row: PrRow, width: int, use_color: bool, login: str | None) -> str:
     """The terminal Assignee cell — weight-not-health, save the Release-PR tint.
 
     Assignee buckets are encoded by weight, not health colour: people you might
@@ -200,9 +204,9 @@ def _assignee_cell(row: PrRow, width: int, use_color: bool) -> str:
     if row.bot_name:
         return dim(truncate(row.bot_name, width), use_color)
     if row.assignees:
-        text = truncate(", ".join(row.assignees), width)
+        text = truncate(_display_assignees_plain(row, login), width)
         # Dim only when there's nobody to chase but yourself.
-        return dim(text, use_color) if row.assignees == ["me"] else text
+        return dim(text, use_color) if row.assignees == [login] else text
     return ""
 
 
@@ -213,6 +217,7 @@ def _pr_row_line(
     gap: str,
     use_color: bool,
     use_links: bool,
+    login: str | None,
 ) -> str:
     """One PR data row, dimmed whole when it is neither yours nor to-review.
 
@@ -247,7 +252,7 @@ def _pr_row_line(
             cc,
         ),
         truncate(row.title, width_by["Title"]),
-        _assignee_cell(row, width_by["Assignee"], cc),
+        _assignee_cell(row, width_by["Assignee"], cc, login),
         dim(format_age(row.age_days), cc),
         last,
         colorize(_review_text(row), _review_color(row), cc),
@@ -265,6 +270,7 @@ def terminal_table(
     use_color: bool,
     use_links: bool = False,
     show_timeline: bool = False,
+    login: str | None = None,
 ) -> str:
     """The terminal PR table: bold header, labelled group dividers, one row each.
 
@@ -273,7 +279,8 @@ def terminal_table(
     decides, this just accepts the flag). Rows are sorted into the yours /
     to-review / the-rest groups; each group opens with a divider carrying its
     label and count, and the-rest rows are rendered plain then dimmed whole.
-    ``show_timeline`` adds each row's activity-strip sub-line.
+    ``show_timeline`` adds each row's activity-strip sub-line. ``login`` is the
+    viewer, shown as ``me`` in the Assignee column.
     """
     columns = _columns(terminal_width())
     width_by = {name: w for name, w, _ in columns}
@@ -291,7 +298,9 @@ def terminal_table(
             label = f"{GROUP_LABELS[group]} ({group_sizes[group]})"
             lines.append(divider(label, total, use_color))
         previous_group = group
-        lines.append(_pr_row_line(row, columns, width_by, gap, use_color, use_links))
+        lines.append(
+            _pr_row_line(row, columns, width_by, gap, use_color, use_links, login)
+        )
         if show_timeline:
             lines.append(_timeline_subline(row, use_color))
 
@@ -302,6 +311,7 @@ def owner_table(
     sections: list[tuple[str, list[PrRow]]],
     use_color: bool,
     use_links: bool = False,
+    login: str | None = None,
 ) -> str:
     """The terminal owner-wide PR table: one header, a divider + rows per repo.
 
@@ -325,7 +335,7 @@ def owner_table(
         lines.append(divider(f"{repo} · {len(rows)} open", total, use_color))
         for row in rows:
             lines.append(
-                _pr_row_line(row, columns, width_by, gap, use_color, use_links)
+                _pr_row_line(row, columns, width_by, gap, use_color, use_links, login)
             )
 
     return "\n".join(line.rstrip() for line in lines)
@@ -452,10 +462,11 @@ def _markdown_signals(row: PrRow) -> list[str]:
     return signals
 
 
-def markdown_table(rows: list[PrRow]) -> str:
+def markdown_table(rows: list[PrRow], login: str | None = None) -> str:
     """The markdown PR table — colour-free, so state words and a Signal column
     carry what the terminal conveys by glyph, weight, and hue. Pipes in any cell
-    are escaped so a ``|`` in a title can't break the table.
+    are escaped so a ``|`` in a title can't break the table. ``login`` is the
+    viewer, shown as ``me`` in the Assignee column.
     """
     lines = [
         "| PR ID | Title | State | Assignee | Age | Last | Review | CI | "
@@ -466,7 +477,7 @@ def markdown_table(rows: list[PrRow]) -> str:
     for row in sorted(rows, key=sort_key):
         pr_id = f"[#{row.number}]({row.url})" if row.url else f"#{row.number}"
         title = escape_markdown_cell(row.title)
-        assignees = escape_markdown_cell(_display_assignees_plain(row))
+        assignees = escape_markdown_cell(_display_assignees_plain(row, login))
         signal = escape_markdown_cell(", ".join(_markdown_signals(row)))
         lines.append(
             f"| {pr_id} | {title} | {STATE_LABELS[pr_state(row)]} | {assignees} | "
@@ -478,7 +489,9 @@ def markdown_table(rows: list[PrRow]) -> str:
     return "\n".join(lines)
 
 
-def owner_markdown(sections: list[tuple[str, list[PrRow]]]) -> str:
+def owner_markdown(
+    sections: list[tuple[str, list[PrRow]]], login: str | None = None
+) -> str:
     """Markdown owner-wide view: a ``## OWNER/REPO`` heading + table per section.
 
     Each section reuses :func:`markdown_table` (the same colour-free table the
@@ -487,5 +500,5 @@ def owner_markdown(sections: list[tuple[str, list[PrRow]]]) -> str:
     order — the markdown counterpart of :func:`owner_table`.
     """
     return "\n\n".join(
-        f"## {repo}\n\n{markdown_table(rows)}" for repo, rows in sections
+        f"## {repo}\n\n{markdown_table(rows, login)}" for repo, rows in sections
     )

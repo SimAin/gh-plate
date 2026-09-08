@@ -163,7 +163,7 @@ def test_pr_number_is_hyperlinked_only_when_enabled() -> None:
 
 def test_terminal_color_can_be_disabled() -> None:
     rows = rows_for(pr(1, "Mine", ["user"]))
-    output = render.terminal_table(rows, use_color=False)
+    output = render.terminal_table(rows, use_color=False, login="user")
 
     assert "\033[" not in output
     assert "#1" in output
@@ -269,16 +269,25 @@ def test_age_and_last_columns_align_in_header() -> None:
 
 def test_assignee_me_only_is_dimmed() -> None:
     rows = rows_for(pr(1, "Mine", ["user"]))
-    assert render._display_assignees_plain(rows[0]) == "me"
-    assert f"{DIM}me{RESET}" in render.terminal_table(rows, use_color=True)
+    assert render._display_assignees_plain(rows[0], "user") == "me"
+    out = render.terminal_table(rows, use_color=True, login="user")
+    assert f"{DIM}me{RESET}" in out
+    assert "user" not in out
+
+
+def test_shared_assignees_show_me_among_the_others() -> None:
+    rows = rows_for(pr(1, "Shared", ["user", "alice"]))
+    assert render._display_assignees_plain(rows[0], "user") == "me, alice"
+    assert "| me, alice |" in render.markdown_table(rows, "user")
 
 
 def test_chaseable_human_assignee_stays_full_weight() -> None:
     rows = rows_for(pr(1, "Mine, alice's to land", ["alice"], author="user"))
     assert rows[0].is_mine
-    assert render._display_assignees_plain(rows[0]) == "alice"
+    assert render._display_assignees_plain(rows[0], "user") == "alice"
     # Alice is chaseable, so she stays at full weight (never dimmed).
-    assert f"{DIM}alice" not in render.terminal_table(rows, use_color=True)
+    out = render.terminal_table(rows, use_color=True, login="user")
+    assert f"{DIM}alice" not in out
 
 
 def test_release_pr_has_soft_blue_marker() -> None:
@@ -292,7 +301,7 @@ def test_release_pr_has_soft_blue_marker() -> None:
 def test_bot_authors_are_dimmed() -> None:
     rows = rows_for(pr(1, "Update all deps", author="app/renovate"))
     assert rows[0].bot_name == "renovate"
-    assert render._display_assignees_plain(rows[0]) == "renovate"
+    assert render._display_assignees_plain(rows[0], "user") == "renovate"
     assert f"{DIM}renovate{RESET}" in render.terminal_table(rows, use_color=True)
 
 
@@ -472,7 +481,7 @@ def test_markdown_keeps_scan_signals() -> None:
         pr(2, "To review", ["alice"]),
         pr(3, RELEASE_TITLE, review_decision="APPROVED"),
     )
-    output = render.markdown_table(rows)
+    output = render.markdown_table(rows, "user")
     assert (
         "| PR ID | Title | State | Assignee | Age | Last | Review | CI | "
         "Comments | Signal |"

@@ -476,7 +476,9 @@ present, null when it doesn't apply to the view:
   stderr with a non-zero exit; no JSON is printed then.
 - `data.issues` is a **flat list in display order**; each row carries `repo`,
   `parent_number` and `depth`, which together rebuild the tree, plus a `group`
-  (`yours` / `others` / `unassigned`) in the sprint view. `data.prs` is the
+  (`yours` / `others` / `unassigned`) in the sprint view. In the assigned view
+  every row's `assignees` is `[]` — that query doesn't fetch them, since every
+  row is yours by construction; use the envelope's `assignee`. `data.prs` is the
   rows in the table's order (yours, to review, the rest) with a `summary`
   beside them. For `retro`, `data.days` is the window size and
   `data.sections` is one entry per owner with its channels (`counts` oldest

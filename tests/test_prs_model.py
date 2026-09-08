@@ -161,7 +161,9 @@ def test_release_pr_detection_matches_version_suffix_not_ordinary_prs() -> None:
     assert not model.is_release_pr(None)
 
 
-def test_me_substitution_in_assignees() -> None:
+def test_assignees_keep_raw_logins() -> None:
+    # The "me" swap is the renderers' job; the model (and so the JSON output)
+    # keeps logins a script can filter on.
     rows = model.normalize_rows(
         [
             pr(1, "Just me", ["user"]),
@@ -171,8 +173,8 @@ def test_me_substitution_in_assignees() -> None:
         "user",
     )
 
-    assert rows[0].assignees == ["me"]
-    assert rows[1].assignees == ["me", "alice"]
+    assert rows[0].assignees == ["user"]
+    assert rows[1].assignees == ["user", "alice"]
     assert rows[2].assignees == []
 
 

@@ -157,7 +157,7 @@ def _run_repo(args: argparse.Namespace, repo: str) -> int:
         return 0
 
     if args.format == "markdown":
-        print(render.markdown_table(rows))
+        print(render.markdown_table(rows, login))
     else:
         use_color = color_enabled(args.color)
         if args.show_key:
@@ -173,6 +173,7 @@ def _run_repo(args: argparse.Namespace, repo: str) -> int:
                 use_color,
                 use_links=sys.stdout.isatty(),
                 show_timeline=timeline,
+                login=login,
             )
         )
 
@@ -232,7 +233,7 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
         if target.alias_fired:
             print(f"*{display}*")
             print()
-        print(render.owner_markdown(sections))
+        print(render.owner_markdown(sections, login))
     else:
         use_color = color_enabled(args.color)
         if args.show_key:
@@ -242,7 +243,11 @@ def _run_owner(args: argparse.Namespace, cfg: config.Config) -> int:
             print(render.dim(display, use_color))
         print(render.summary_line(summary_counts(rows)))
         print()
-        print(render.owner_table(sections, use_color, use_links=sys.stdout.isatty()))
+        print(
+            render.owner_table(
+                sections, use_color, use_links=sys.stdout.isatty(), login=login
+            )
+        )
 
     for note in notes:
         print(f"\n{note}", file=sys.stderr)

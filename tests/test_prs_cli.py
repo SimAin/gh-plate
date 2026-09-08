@@ -477,6 +477,7 @@ def test_owner_truncation_note_limit_hit(monkeypatch, capsys, run_with_config) -
         == 0
     )
     err = capsys.readouterr().err
+    assert err.startswith("\nNote: ")  # blank line, then the note
     assert "showing 2 of 5 open PRs for an-org (--limit 2)." in err
 
 
@@ -634,6 +635,25 @@ def test_json_repo_view_emits_summary_and_ordered_rows(
     assert rows[0]["is_mine"] is True and rows[0]["title"] == "Mine"
     assert calls["timeline"] is True  # the strip is data too, only markdown skips it
     assert payload["notes"] == [] and err == ""
+
+
+def test_json_rows_carry_raw_assignee_logins(
+    monkeypatch, capsys, run_with_config
+) -> None:
+    # The terminal shows the viewer as "me"; JSON keeps the login so a script
+    # can filter assignees by it.
+    monkeypatch.setattr(gh, "current_repo", lambda: "acme/widget")
+    _stub_fetch(
+        monkeypatch,
+        prs=[_pr(1, "Shared", assignees=["octocat", "alice"])],
+        login="octocat",
+    )
+    assert (
+        run_with_config(prs_cli.run, cli.parse_args(["prs", "--format", "json"])) == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["login"] == "octocat"
+    assert payload["data"]["prs"][0]["assignees"] == ["octocat", "alice"]
 
 
 def test_json_repo_view_carries_notes_instead_of_printing_them(

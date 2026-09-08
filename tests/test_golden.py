@@ -174,12 +174,18 @@ def test_prs_repo_table_narrow(width) -> None:
     # 81 columns for an 80-column terminal is the documented clamp: Title never
     # goes below MIN_TITLE_WIDTH, the table overflows instead.
     width(80)
-    assert prs_render.terminal_table(pr_rows(), use_color=False) == PRS_REPO_80
+    assert (
+        prs_render.terminal_table(pr_rows(), use_color=False, login="user")
+        == PRS_REPO_80
+    )
 
 
 def test_prs_repo_table_wide(width) -> None:
     width(120)
-    assert prs_render.terminal_table(pr_rows(), use_color=False) == PRS_REPO_120
+    assert (
+        prs_render.terminal_table(pr_rows(), use_color=False, login="user")
+        == PRS_REPO_120
+    )
 
 
 def test_retro_panel_one_owner() -> None:
