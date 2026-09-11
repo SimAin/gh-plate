@@ -102,6 +102,10 @@ class PrRow:
     mergeable_unknown: bool
     check_state: str
     original_index: int
+    additions: int = 0
+    deletions: int = 0
+    changed_files: int = 0
+    size: str = "S"
 
 
 @dataclass(frozen=True)
@@ -162,6 +166,36 @@ def pr_repo(pr: dict[str, Any], default_repo: str) -> str:
         if isinstance(name, str) and name:
             return name
     return default_repo
+
+
+_SIZE_BUCKETS = ("S", "M", "L", "XL")
+
+
+def size_bucket(additions: int, deletions: int, changed_files: int) -> str:
+    """Derive diff size bucket (S/M/L/XL) from diff lines and changed files count.
+
+    Thresholds on additions + deletions:
+      S: <= 50
+      M: <= 250
+      L: <= 1000
+      XL: > 1000
+    Touching more than 20 files rounds up one bucket
+    (S -> M, M -> L, L -> XL, XL stays XL).
+    """
+    total_lines = additions + deletions
+    if total_lines <= 50:
+        idx = 0
+    elif total_lines <= 250:
+        idx = 1
+    elif total_lines <= 1000:
+        idx = 2
+    else:
+        idx = 3
+
+    if changed_files > 20 and idx < 3:
+        idx += 1
+
+    return _SIZE_BUCKETS[idx]
 
 
 def author_login(pr: dict[str, Any]) -> str | None:
@@ -456,6 +490,9 @@ def normalize_rows(
         last_mine: bool | None = None
         if not is_fallback and last_login is not None and current_login is not None:
             last_mine = last_login == current_login
+        additions = int(pr.get("additions") or 0)
+        deletions = int(pr.get("deletions") or 0)
+        changed_files = int(pr.get("changedFiles") or 0)
         rows.append(
             PrRow(
                 repo=pr_repo(pr, repo),
@@ -484,6 +521,10 @@ def normalize_rows(
                 mergeable_unknown=pr.get("mergeable") == "UNKNOWN",
                 check_state=check_state(pr),
                 original_index=index,
+                additions=additions,
+                deletions=deletions,
+                changed_files=changed_files,
+                size=size_bucket(additions, deletions, changed_files),
             )
         )
     return rows

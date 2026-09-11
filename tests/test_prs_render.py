@@ -483,16 +483,16 @@ def test_markdown_keeps_scan_signals() -> None:
     )
     output = render.markdown_table(rows, "user")
     assert (
-        "| PR ID | Title | State | Assignee | Age | Last | Review | CI | "
+        "| PR ID | Title | State | Assignee | Size | Age | Last | Review | CI | "
         "Comments | Signal |"
     ) in output
     assert (
         "| [#1](https://github.com/acme/widget/pull/1) | Mine | "
-        "waiting | me |  |  | pending |  | 0 | mine |"
+        "waiting | me | S |  |  | pending |  | 0 | mine |"
     ) in output
     assert (
         "| [#2](https://github.com/acme/widget/pull/2) | To review | "
-        "waiting | alice |  |  | pending |  | 0 | To Review |"
+        "waiting | alice | S |  |  | pending |  | 0 | To Review |"
     ) in output
     # The release PR reads as "ready" only after approval; its signal is kept.
     assert "| Release PR |" in output

@@ -46,6 +46,9 @@ query($owner: String!, $name: String!, $pageSize: Int!, $endCursor: String) {
         updatedAt
         mergeable
         totalCommentsCount
+        additions
+        deletions
+        changedFiles
         reviewDecision
         author { login __typename }
         assignees(first: 20) { nodes { login } }
@@ -123,6 +126,9 @@ fragment PrFields on PullRequest {
   updatedAt
   mergeable
   totalCommentsCount
+  additions
+  deletions
+  changedFiles
   reviewDecision
   author { login __typename }
   assignees(first: 20) { nodes { login } }

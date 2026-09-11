@@ -112,26 +112,26 @@ Issue                                                                           
 ✓   #3 Standalone                                                                      5d                              0"""
 
 PRS_REPO_80 = """\
-   PR      Title             Assignee           Age  Last  Review         CI  Cmt
-── yours (2) ────────────────────────────────────────────────────────────────────
-✓  #41     Add width-aware…  me                  7d    1d  approved       ✓     0
-•  #37     Rework the spri…  me                  4w    2w  pending        ✗     0
-── to review (2) ────────────────────────────────────────────────────────────────
-•  #35     重构面板布局与…   alice               3d    2d  pending              3
-•  #30     chore(main): re…  Release PR          0d        pending        ✓     0
-── the rest (1) ─────────────────────────────────────────────────────────────────
-✓  #22     Bump actions/ch…  bob                2mo    9d  approved       ✓     0"""
+   PR      Title             Assignee          Size   Age  Last  Review         CI  Cmt
+── yours (2) ──────────────────────────────────────────────────────────────────────────
+✓  #41     Add width-aware…  me                S       7d    1d  approved       ✓     0
+•  #37     Rework the spri…  me                S       4w    2w  pending        ✗     0
+── to review (2) ──────────────────────────────────────────────────────────────────────
+•  #35     重构面板布局与…   alice             S       3d    2d  pending              3
+•  #30     chore(main): re…  Release PR        S       0d        pending        ✓     0
+── the rest (1) ───────────────────────────────────────────────────────────────────────
+✓  #22     Bump actions/ch…  bob               S      2mo    9d  approved       ✓     0"""
 
 PRS_REPO_120 = """\
-   PR      Title                                               Assignee           Age  Last  Review         CI  Cmt
-── yours (2) ──────────────────────────────────────────────────────────────────────────────────────────────────────
-✓  #41     Add width-aware truncation                          me                  7d    1d  approved       ✓     0
-•  #37     Rework the sprint buckets                           me                  4w    2w  pending        ✗     0
-── to review (2) ──────────────────────────────────────────────────────────────────────────────────────────────────
-•  #35     重构面板布局与颜色                                  alice               3d    2d  pending              3
-•  #30     chore(main): release 0.5.0                          Release PR          0d        pending        ✓     0
-── the rest (1) ───────────────────────────────────────────────────────────────────────────────────────────────────
-✓  #22     Bump actions/checkout                               bob                2mo    9d  approved       ✓     0"""
+   PR      Title                                              Assignee          Size   Age  Last  Review         CI  Cmt
+── yours (2) ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+✓  #41     Add width-aware truncation                         me                S       7d    1d  approved       ✓     0
+•  #37     Rework the sprint buckets                          me                S       4w    2w  pending        ✗     0
+── to review (2) ───────────────────────────────────────────────────────────────────────────────────────────────────────
+•  #35     重构面板布局与颜色                                 alice             S       3d    2d  pending              3
+•  #30     chore(main): release 0.5.0                         Release PR        S       0d        pending        ✓     0
+── the rest (1) ────────────────────────────────────────────────────────────────────────────────────────────────────────
+✓  #22     Bump actions/checkout                              bob               S      2mo    9d  approved       ✓     0"""
 
 RETRO_ONE_OWNER = """\
 ── acme · last 14 days ───────────────────────────────────────────────────

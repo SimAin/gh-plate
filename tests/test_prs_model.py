@@ -712,3 +712,64 @@ def test_clean_title_cuts_by_display_width() -> None:
     out = model.clean_title(title, max_length=20)
     assert out == "支" * 9 + "…"  # 18 columns of title + the ellipsis
     assert visible_length(out) <= 20
+
+
+# ---------------------------------------------------------------------------
+# size_bucket
+# ---------------------------------------------------------------------------
+
+
+def test_size_bucket_zero_is_small() -> None:
+    assert model.size_bucket(0, 0, 0) == "S"
+
+
+def test_size_bucket_boundary_s_exact() -> None:
+    assert model.size_bucket(25, 25, 0) == "S"  # total = 50 → S
+
+
+def test_size_bucket_boundary_s_to_m() -> None:
+    assert model.size_bucket(26, 25, 0) == "M"  # total = 51 → M
+
+
+def test_size_bucket_boundary_m_exact() -> None:
+    assert model.size_bucket(125, 125, 0) == "M"  # total = 250 → M
+
+
+def test_size_bucket_boundary_m_to_l() -> None:
+    assert model.size_bucket(126, 125, 0) == "L"  # total = 251 → L
+
+
+def test_size_bucket_boundary_l_exact() -> None:
+    assert model.size_bucket(500, 500, 0) == "L"  # total = 1000 → L
+
+
+def test_size_bucket_boundary_l_to_xl() -> None:
+    assert model.size_bucket(501, 500, 0) == "XL"  # total = 1001 → XL
+
+
+def test_size_bucket_xl_stays_xl() -> None:
+    assert model.size_bucket(10000, 0, 0) == "XL"
+
+
+def test_size_bucket_file_count_rounds_up_s_to_m() -> None:
+    # 30 lines (S territory) but 21 files → round up to M
+    assert model.size_bucket(15, 15, 21) == "M"
+
+
+def test_size_bucket_file_count_rounds_up_m_to_l() -> None:
+    assert model.size_bucket(100, 100, 25) == "L"  # 200 lines → M, files → L
+
+
+def test_size_bucket_file_count_rounds_up_l_to_xl() -> None:
+    assert model.size_bucket(400, 400, 30) == "XL"  # 800 lines → L, files → XL
+
+
+def test_size_bucket_xl_unaffected_by_file_count() -> None:
+    # XL stays XL even with many files (can't go higher)
+    assert model.size_bucket(2000, 0, 100) == "XL"
+
+
+def test_size_bucket_file_count_exactly_20_no_roundup() -> None:
+    # ≤20 files: no round-up
+    assert model.size_bucket(25, 25, 20) == "S"  # total = 50, 20 files → S
+
