@@ -12,6 +12,9 @@ keep it small and opinionated are the easiest to land.
   weight encoding attention — see [`DECISIONS.md`](./DECISIONS.md)), and it's
   cheaper to agree the shape before the code exists.
 - Issues labelled `good first issue` are scoped and ready to pick up.
+- **Claim an issue before starting on it**: comment on it and wait to be
+  assigned. An assigned issue is taken, so check the assignee and any linked
+  PRs first — it saves two people building the same thing.
 
 ## Set-up
 
