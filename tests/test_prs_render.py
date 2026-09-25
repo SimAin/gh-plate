@@ -47,6 +47,9 @@ def pr(
     last_commit: tuple[str, str | None] | None = None,
     last_review: tuple[str, str] | None = None,
     last_comment: tuple[str, str] | None = None,
+    additions: int = 0,
+    deletions: int = 0,
+    changed_files: int = 0,
 ) -> dict[str, object]:
     """A PR node in the GraphQL shape the fetch layer produces.
 
@@ -96,6 +99,9 @@ def pr(
             else []
         },
         "commits": {"nodes": [{"commit": commit}]},
+        "additions": additions,
+        "deletions": deletions,
+        "changedFiles": changed_files,
     }
 
 
@@ -483,16 +489,16 @@ def test_markdown_keeps_scan_signals() -> None:
     )
     output = render.markdown_table(rows, "user")
     assert (
-        "| PR ID | Title | State | Assignee | Age | Last | Review | CI | "
+        "| PR ID | Title | State | Assignee | Size | Age | Last | Review | CI | "
         "Comments | Signal |"
     ) in output
     assert (
         "| [#1](https://github.com/acme/widget/pull/1) | Mine | "
-        "waiting | me |  |  | pending |  | 0 | mine |"
+        "waiting | me | S |  |  | pending |  | 0 | mine |"
     ) in output
     assert (
         "| [#2](https://github.com/acme/widget/pull/2) | To review | "
-        "waiting | alice |  |  | pending |  | 0 | To Review |"
+        "waiting | alice | S |  |  | pending |  | 0 | To Review |"
     ) in output
     # The release PR reads as "ready" only after approval; its signal is kept.
     assert "| Release PR |" in output
@@ -725,3 +731,32 @@ def test_key_teaches_strip_only_with_timeline() -> None:
     assert "Strip" in key
     assert "right edge = today" in key
     assert "\033[" not in key
+
+
+def test_keys_teach_size_buckets() -> None:
+    expected = "Size = diff lines: S ≤50 · M ≤250 · L ≤1000 · XL"
+    key = render.symbol_key(use_color=False)
+    assert expected in key
+    owner_k = render.owner_key(use_color=False)
+    assert expected in owner_k
+
+
+def test_size_column_weight_by_group() -> None:
+    # to review group: full weight (not dim)
+    # yours and the rest groups: dimmed
+    node_mine = pr(1, "Mine", ["user"])
+    node_to_review = pr(2, "To review", ["alice"])
+    node_settled = pr(3, "Settled", ["bob"], review_decision="APPROVED")
+
+    rows = rows_for(node_mine, node_to_review, node_settled)
+    out = render.terminal_table(rows, use_color=True, login="user")
+
+    # In to review row, Size (S) should NOT be dimmed with DIM
+    lines = out.splitlines()
+    to_review_line = next(line for line in lines if "#2" in line)
+    # Check that "S   " in to_review is not surrounded by DIM escape
+    assert f"{DIM}S" not in to_review_line
+
+    # In yours row, Size (S) SHOULD be dimmed
+    mine_line = next(line for line in lines if "#1" in line)
+    assert f"{DIM}S" in mine_line
