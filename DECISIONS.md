@@ -483,6 +483,16 @@ when an existing key changes meaning or disappears, never for additions.
 
 ---
 
+## D16 — PR Size column: buckets, review weighting, and no per-file fetch (issue #121)
+
+**Decision:** add a one-character `Size` column to `plate prs` (`S` / `M` / `L` / `XL`), derived from diff magnitude (`additions + deletions` with `changedFiles` as tie-breaker). S sits at ≤50, M at ≤250, L at ≤1000, XL above; touching >20 files rounds up one bucket. The column renders between `Assignee` and `Age`, styled at full weight on `to review` rows and dimmed everywhere else. Markdown carries the bucket word; JSON carries raw `additions`, `deletions`, `changed_files`, and `size`.
+
+**Why weight by group:** size is a decision aid for choosing what to review next (e.g. before standup). On `yours` and `the rest`, size is context and dims back, adhering to the tool's attention discipline.
+
+**The "no per-file fetch" trade:** GitHub's GraphQL PR node exposes `additions`, `deletions`, and `changedFiles` without extra queries, keeping the repo and owner views to a single round trip. Filtering generated files (linguist-generated lockfiles, assets) would require per-file pagination, multiplying API requests. Accepting that generated files inflate the diff preserves single-round-trip performance, and release PRs are already tinted as Release PRs so context remains clear.
+
+---
+
 ## Standing decisions carried from the architecture discussion
 
 - **Standalone, not a shared package.** The GraphQL fetch layer is specific enough

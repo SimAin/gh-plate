@@ -101,6 +101,10 @@ class PrRow:
     has_conflicts: bool
     mergeable_unknown: bool
     check_state: str
+    additions: int
+    deletions: int
+    changed_files: int
+    size: str
     original_index: int
 
 
@@ -432,6 +436,34 @@ def row_flags(
     return is_mine, is_to_review
 
 
+def pr_size(additions: int, deletions: int, changed_files: int) -> str:
+    """Derive the S / M / L / XL size bucket from a PR's diff and file count.
+
+    Thresholds on additions + deletions:
+    - S: <= 50
+    - M: <= 250
+    - L: <= 1000
+    - XL: > 1000
+
+    A PR touching more than 20 files rounds up one bucket (S->M, M->L, L->XL).
+    """
+    diff = additions + deletions
+    if diff <= 50:
+        bucket = "S"
+    elif diff <= 250:
+        bucket = "M"
+    elif diff <= 1000:
+        bucket = "L"
+    else:
+        bucket = "XL"
+
+    if changed_files > 20:
+        bump = {"S": "M", "M": "L", "L": "XL", "XL": "XL"}
+        bucket = bump[bucket]
+
+    return bucket
+
+
 def normalize_rows(
     prs: list[dict[str, Any]],
     current_login: str | None,
@@ -456,6 +488,9 @@ def normalize_rows(
         last_mine: bool | None = None
         if not is_fallback and last_login is not None and current_login is not None:
             last_mine = last_login == current_login
+        additions = int(pr.get("additions") or 0)
+        deletions = int(pr.get("deletions") or 0)
+        changed_files = int(pr.get("changedFiles") or 0)
         rows.append(
             PrRow(
                 repo=pr_repo(pr, repo),
@@ -483,6 +518,10 @@ def normalize_rows(
                 has_conflicts=has_conflicts(pr),
                 mergeable_unknown=pr.get("mergeable") == "UNKNOWN",
                 check_state=check_state(pr),
+                additions=additions,
+                deletions=deletions,
+                changed_files=changed_files,
+                size=pr_size(additions, deletions, changed_files),
                 original_index=index,
             )
         )

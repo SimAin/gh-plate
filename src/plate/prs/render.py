@@ -116,6 +116,7 @@ def _timeline_subline(row: PrRow, use_color: bool) -> str:
 _FIXED_BEFORE_TITLE: list[tuple[str, int, str]] = [("", 1, "left"), ("PR", 6, "left")]
 _FIXED_AFTER_TITLE: list[tuple[str, int, str]] = [
     ("Assignee", 16, "left"),
+    ("Size", 4, "left"),
     ("Age", 4, "right"),
     ("Last", 4, "right"),
     ("Review", 13, "left"),
@@ -241,6 +242,7 @@ def _pr_row_line(
         last = last_text
     else:
         last = dim(last_text, cc)
+    size = row.size if row.is_to_review else dim(row.size, cc)
     values = [
         colorize(glyph, glyph_color, cc),
         dim(
@@ -253,6 +255,7 @@ def _pr_row_line(
         ),
         truncate(row.title, width_by["Title"]),
         _assignee_cell(row, width_by["Assignee"], cc, login),
+        size,
         dim(format_age(row.age_days), cc),
         last,
         colorize(_review_text(row), _review_color(row), cc),
@@ -396,6 +399,7 @@ def symbol_key(use_color: bool, show_timeline: bool = False) -> str:
             use_color,
         )
     )
+    lines.append(dim("  Size = diff lines: S ≤50 · M ≤250 · L ≤1000 · XL", use_color))
     if show_timeline:
         lines.append(
             dim(
@@ -438,6 +442,7 @@ def owner_key(use_color: bool) -> str:
                 "bright Last = their move, yours to answer",
                 use_color,
             ),
+            dim("  Size = diff lines: S ≤50 · M ≤250 · L ≤1000 · XL", use_color),
             dim(
                 "  Rows are grouped by repository, most recently active repo "
                 "first · Last in rose = stale · dimmed rows are neither yours "
@@ -469,9 +474,9 @@ def markdown_table(rows: list[PrRow], login: str | None = None) -> str:
     viewer, shown as ``me`` in the Assignee column.
     """
     lines = [
-        "| PR ID | Title | State | Assignee | Age | Last | Review | CI | "
+        "| PR ID | Title | State | Assignee | Size | Age | Last | Review | CI | "
         "Comments | Signal |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
 
     for row in display_order(rows):
@@ -481,7 +486,8 @@ def markdown_table(rows: list[PrRow], login: str | None = None) -> str:
         signal = escape_markdown_cell(", ".join(_markdown_signals(row)))
         lines.append(
             f"| {pr_id} | {title} | {STATE_LABELS[pr_state(row)]} | {assignees} | "
-            f"{format_age(row.age_days)} | {format_age(row.last_activity_days)} | "
+            f"{row.size} | {format_age(row.age_days)} | "
+            f"{format_age(row.last_activity_days)} | "
             f"{_review_text(row)} | {_check_label(row)} | "
             f"{row.comments_count} | {signal} |"
         )

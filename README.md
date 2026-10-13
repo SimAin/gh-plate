@@ -197,6 +197,12 @@ The remaining columns carry the detail:
   `me`, bot authors (`dependabot`, `renovate`, `github-actions`, …), and
   unassigned (blank) dimmed back; an open `Release PR` flagged with a soft
   non-health tint.
+- **Size** — diff magnitude (`S` ≤50 · `M` ≤250 · `L` ≤1000 · `XL` lines changed;
+  touching >20 files rounds up one bucket). Full weight on `to review` rows to
+  help pick a quick review before standup; dimmed everywhere else as context.
+  *Note on diffs:* generated files and lockfiles count toward the total because
+  GitHub does not expose linguistic markings without extra per-file fetches;
+  release PRs carry an `L` or `XL` but are already tinted as Release PRs.
 
 Settled PRs in "the rest" are dimmed so your attention lands on what's live.
 

@@ -712,3 +712,36 @@ def test_clean_title_cuts_by_display_width() -> None:
     out = model.clean_title(title, max_length=20)
     assert out == "支" * 9 + "…"  # 18 columns of title + the ellipsis
     assert visible_length(out) <= 20
+
+
+def test_pr_size_boundaries() -> None:
+    # S: <= 50
+    assert model.pr_size(additions=0, deletions=0, changed_files=1) == "S"
+    assert model.pr_size(additions=30, deletions=20, changed_files=5) == "S"
+    assert model.pr_size(additions=50, deletions=0, changed_files=20) == "S"
+
+    # M: 51 .. 250
+    assert model.pr_size(additions=51, deletions=0, changed_files=1) == "M"
+    assert model.pr_size(additions=150, deletions=100, changed_files=10) == "M"
+    assert model.pr_size(additions=250, deletions=0, changed_files=10) == "M"
+
+    # L: 251 .. 1000
+    assert model.pr_size(additions=251, deletions=0, changed_files=1) == "L"
+    assert model.pr_size(additions=500, deletions=500, changed_files=15) == "L"
+    assert model.pr_size(additions=1000, deletions=0, changed_files=15) == "L"
+
+    # XL: > 1000
+    assert model.pr_size(additions=1001, deletions=0, changed_files=1) == "XL"
+    assert model.pr_size(additions=5000, deletions=2000, changed_files=5) == "XL"
+
+
+def test_pr_size_file_count_roundup() -> None:
+    # When changed_files > 20, bucket rounds up: S->M, M->L, L->XL, XL->XL
+    assert model.pr_size(additions=30, deletions=10, changed_files=21) == "M"
+    assert model.pr_size(additions=150, deletions=50, changed_files=25) == "L"
+    assert model.pr_size(additions=500, deletions=200, changed_files=30) == "XL"
+    assert model.pr_size(additions=1200, deletions=100, changed_files=40) == "XL"
+
+    # Boundary at exactly 20 files: no round-up
+    assert model.pr_size(additions=30, deletions=10, changed_files=20) == "S"
+    assert model.pr_size(additions=150, deletions=50, changed_files=20) == "M"
