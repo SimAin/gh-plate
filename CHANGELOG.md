@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.8.0](https://github.com/SimAin/gh-plate/compare/v1.7.1...v1.8.0) (2026-10-13)
+
+
+### Features
+
+* add --format json to every view ([#117](https://github.com/SimAin/gh-plate/issues/117)) ([68dc033](https://github.com/SimAin/gh-plate/commit/68dc0338a173d7576d51c681be32106fe4db07b4))
+* **prs:** add one-character Size column bright in to-review group ([#125](https://github.com/SimAin/gh-plate/issues/125)) ([722ee68](https://github.com/SimAin/gh-plate/commit/722ee6884d33a5387142792138a259c3d8918e6b))
+
+
+### Documentation
+
+* ask contributors to claim an issue before starting ([#127](https://github.com/SimAin/gh-plate/issues/127)) ([c3fcd43](https://github.com/SimAin/gh-plate/commit/c3fcd43ea8f973b34342f42323e940caf8f37345))
+* **prs:** correct size column caveat ([#130](https://github.com/SimAin/gh-plate/issues/130)) ([b8d59be](https://github.com/SimAin/gh-plate/commit/b8d59beca23fb3f000d6f245104b7c72f0c00757))
+
 ## [1.7.1](https://github.com/SimAin/gh-plate/compare/v1.7.0...v1.7.1) (2026-08-28)
 
 
